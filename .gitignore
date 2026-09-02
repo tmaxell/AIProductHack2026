@@ -1,0 +1,35 @@
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.codex-log/
+*.swp
+*~
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.local
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.pytest_cache/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+.tmp/
+
+# Generated data: keep only its policy file
+data/derived/*
+!data/derived/README.md
