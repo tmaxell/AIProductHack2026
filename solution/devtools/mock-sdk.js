@@ -143,9 +143,15 @@ class Datasheet {
 class Space {
   constructor(seedData) {
     this._byId = new Map();
+    // Ключ "applications" в seed — то, что реально симулирует "виджет установлен внутри датасета
+    // Заявки" (см. авто-детект в config.js#runWizard): getActiveDatasheetAsync() должен вернуть
+    // именно её, а не первую попавшуюся по порядку ключей seedData.datasheets.
+    this._activeDatasheet = null;
     for (const key of Object.keys(seedData.datasheets)) {
       const state = seedData.datasheets[key];
-      this._byId.set(state.id, new Datasheet(state));
+      const ds = new Datasheet(state);
+      this._byId.set(state.id, ds);
+      if (key === 'applications') this._activeDatasheet = ds;
     }
   }
 
@@ -157,9 +163,10 @@ class Space {
 
   // Эмпирически на реальном MWS обнаружено: input.textAsync не реагирует на ввод, если перед ним
   // ни разу не было вызвано ни одного space.*Async — см. "прогрев" в main.js и PLATFORM-NOTES.md.
-  // Мок возвращает первый попавшийся датасет (конкретное значение не важно, важен сам факт await).
+  // Также используется для авто-детекта таблицы "Заявки" в мастере настройки (см. config.js) —
+  // в реальном MWS виджет считается установленным внутри той таблицы, из которой его запустили.
   async getActiveDatasheetAsync() {
-    return [...this._byId.values()][0] || null;
+    return this._activeDatasheet || [...this._byId.values()][0] || null;
   }
 }
 

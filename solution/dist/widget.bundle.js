@@ -69,17 +69,42 @@ const PROJECT_TARGET_FIELDS = [
 // Аналогично — поля "Задач", которыми управляет виджет (Link-поля + идемпотентность), а не CSV.
 const TASK_TARGET_EXTRA_FIELDS = ['project_link', 'assignee_link', 'source_key', 'blocked_by_link'];
 
+// Роли "Заявок", которые мастер настройки реально спрашивает — подмножество APPLICATION_RAW_FIELDS:
+// сюда НЕ входят роли, которые ни одно место в уже реализованном коде (Milestones 1-7) не читает —
+// спрашивать про них сейчас бессмысленно (по мере реализации Milestones 8-10 сюда добавится то, что
+// им понадобится, и пользователь один раз пройдёт "reconfigure"). Список того, что не используется
+// СЕЙЧАС — не "никогда не будет": project_description_raw/sla_raw/comment_raw — описательный текст,
+// не участвующий в правилах; source_channel_raw/external_reference_raw/parent_project_raw/
+// source_system/source_row_key — метаданные источника, нужны будущим Milestone 8-10 (создание
+// задач/проекта, но не самим normalize/match/classify/anomalies); created_at_raw/updated_at_raw —
+// нужны будущему отчёту (Milestone 10), не текущим правилам качества данных.
+const APPLICATION_UNUSED_RAW_FIELDS = new Set([
+  'project_description_raw', 'sla_raw', 'source_channel_raw', 'external_reference_raw',
+  'parent_project_raw', 'comment_raw', 'created_at_raw', 'updated_at_raw', 'source_system', 'source_row_key',
+]);
+
 // Логические роли полей, которые мастер настройки (Milestone 2) обязан спросить у пользователя —
 // см. solution/plan/milestone-02-config-wizard.md. В реальном MWS названия полей могут отличаться
 // от наших raw-колонок, поэтому это отдельный список "ролей", а не просто алиас APPLICATION_RAW_FIELDS
 // и т.п. (для applications роли совпадают с raw-колонками, т.к. это и есть исходные поля).
+//
+// "Проекты" и "Задачи" НЕТ в этом объекте вообще — ни одно место в уже реализованном коде их не
+// читает (Milestones 8-10 не реализованы), см. также solution/src/lib/config.js#TABLE_LABELS.
 const WIZARD_ROLES = {
-  applications: APPLICATION_RAW_FIELDS.slice(),
+  applications: APPLICATION_RAW_FIELDS.filter((f) => !APPLICATION_UNUSED_RAW_FIELDS.has(f)),
   companies: ['inn', 'email', 'phone', 'city', 'aliases', 'legalName', 'active'],
   employees: ['fio', 'email', 'phone', 'role', 'skills', 'specializations', 'capacityHoursWeek', 'currentLoadPct', 'absentFrom', 'absentTo', 'active'],
   templates: ['projectType', 'taskCode', 'taskName', 'order', 'durationHours', 'requiredRole', 'requiredSkills', 'predecessorCode', 'defaultPriority', 'mandatory'],
-  projects: ['projectName', 'projectType', 'priority', 'budget', 'currency', 'plannedStart', 'plannedEnd', 'status', 'companyLink'],
-  tasks: ['taskName', 'status', 'priority', 'projectLink', 'assigneeLink', 'estimatedHours', 'dueDate', 'requiredRole', 'requiredSkills', 'sourceKey', 'blockedByLink'],
+};
+
+// Общий словарь приоритета (рус/eng слова, P1..P4, 1..4) — общедоменное знание, не список из CSV
+// (см. PLAN.md#данные). Используется и классификатором (Milestone 6), и авто-детектом мастера
+// настройки по содержимому (Milestone 2) — единственный источник правды, чтобы не разойтись.
+const PRIORITY_DICTIONARY = {
+  p1: 'Критический', p2: 'Высокий', p3: 'Средний', p4: 'Низкий',
+  1: 'Критический', 2: 'Высокий', 3: 'Средний', 4: 'Низкий',
+  критический: 'Критический', высокий: 'Высокий', средний: 'Средний', низкий: 'Низкий',
+  critical: 'Критический', high: 'Высокий', medium: 'Средний', normal: 'Средний', low: 'Низкий',
 };
 
 // Поля на "Заявках", которыми владеет сам виджет (пишет их, не спрашивает про них в мастере).
@@ -104,6 +129,7 @@ const schema = {
   TASK_TARGET_EXTRA_FIELDS,
   WIZARD_ROLES,
   SYSTEM_APPLICATION_FIELDS,
+  PRIORITY_DICTIONARY,
 };
 
 // Milestone 11: под Node — обычный module.exports; в бандле для MWS (после сборки build.js, где
@@ -702,13 +728,16 @@ const DEFAULT_THRESHOLDS = {
   classifyManualLow: 0.3, // ниже — классификатор не предлагает вообще (слишком мало сигналов)
 };
 
+// Только таблицы, которые реально читает уже реализованная логика (Milestones 1-7). "Проекты",
+// "Задачи" и "Copilot Runs" в схеме предусмотрены (см. PLAN.md#целевая-структура-данных-в-mws-tables),
+// но ни одно место в коде их пока не читает (Milestones 8-10 не реализованы) — спрашивать про них
+// сейчас бессмысленно и утомительно; появятся в мастере, когда те milestone'ы будут готовы (тогда
+// же добавится поддержка команды "reconfigure" для их первого заполнения без потери уже введённого).
 const TABLE_LABELS = {
   applications: 'Заявки (текущая таблица)',
   companies: 'Компании',
   employees: 'Сотрудники',
   templates: 'Шаблоны задач',
-  projects: 'Проекты',
-  tasks: 'Задачи',
 };
 
 function readCache() {
@@ -746,10 +775,69 @@ function clearCache() {
 // собственным `const WIZARD_ROLES` внутри schema.js в общей области видимости — назвал локальную
 // переменную иначе (wizardRoles) специально, чтобы не плодить одноимённые объявления.
 let schemaLib;
+let normalizeLib;
 
   schemaLib = globalThis.CopilotLib.schema;
+  normalizeLib = globalThis.CopilotLib.normalize;
 
 const wizardRoles = schemaLib.WIZARD_ROLES;
+
+// Авто-определение поля мастером настройки ПО СОДЕРЖИМОМУ значений (не по названию поля — реальное
+// название может быть каким угодно, см. обсуждение в PLAN.md#авто-детект-по-содержимому). Только для
+// ролей с узнаваемым, ОДНОЗНАЧНЫМ форматом, который не путается с другими полями заявки: валюта
+// (по словарю кодов/слов) и приоритет (по словарю). Email/телефон/даты НЕ сюда — у заявки их по паре
+// (компания vs заявитель, начало vs конец), формат одинаковый у обоих, содержимое не скажет какое из
+// двух какое. budget_raw ТОЖЕ не сюда — эмпирически: normalizeBudget слишком охотно "распознаёт"
+// любое число после зачистки нецифровых символов, коллизирует с датами/длительностью/ID (проверено
+// на dev-sample.csv — 30/30 совпадений budget-детектора нашлось сразу в 4 других полях), margin-проверка
+// ниже это отсекла — не ошиблась, но и не помогла: пришлось бы держать порог настолько строгим, что
+// он бы никогда не сработал. Спрашивается явно, как раньше.
+const CONTENT_DETECTORS = {
+  currency_raw: (v) => normalizeLib.normalizeCurrency(v).confidence > 0,
+  priority_raw: (v) => Boolean(schemaLib.PRIORITY_DICTIONARY[
+    String(v).trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, '')
+  ]),
+};
+const CONTENT_DETECT_SAMPLE_SIZE = 30;
+const CONTENT_DETECT_MIN_SCORE = 0.6; // доля образцов, распознанных детектором — ниже не уверены
+const CONTENT_DETECT_MIN_MARGIN = 0.2; // отрыв от второго кандидата — иначе два поля неотличимы
+
+/**
+ * Пытается для каждой роли из `roles`, у которой есть детектор в CONTENT_DETECTORS, найти РОВНО
+ * ОДНО явно лучшее поле по значениям первых записей датасета. Возвращает {role: Field} только для
+ * уверенных однозначных совпадений — если кандидатов несколько с похожим счётом или уверенность
+ * ниже порога, роль в результат не попадает и будет спрошена явно через input.fieldAsync, как обычно.
+ * Ничего не решает по имени поля — только по факту, что бОльшая часть его значений распознаётся
+ * как ожидаемый формат (см. solution/src/lib/normalize.js).
+ */
+async function detectFieldsByContent(datasheet, roles) {
+  const detectableRoles = roles.filter((r) => CONTENT_DETECTORS[r]);
+  if (detectableRoles.length === 0) return {};
+
+  const allRecords = await datasheet.getRecordsAsync();
+  const sample = allRecords.slice(0, CONTENT_DETECT_SAMPLE_SIZE);
+  if (sample.length === 0) return {};
+
+  const valuesByFieldId = new Map(
+    datasheet.fields.map((f) => [f.id, sample.map((r) => r.getCellValue(f.id))]),
+  );
+
+  const detected = {};
+  for (const role of detectableRoles) {
+    const scored = datasheet.fields
+      .map((field) => {
+        const values = valuesByFieldId.get(field.id).filter((v) => v !== null && v !== undefined && String(v).trim() !== '');
+        const score = values.length === 0 ? 0 : values.filter(CONTENT_DETECTORS[role]).length / values.length;
+        return { field, score };
+      })
+      .filter((x) => x.score >= CONTENT_DETECT_MIN_SCORE)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= CONTENT_DETECT_MIN_MARGIN)) {
+      detected[role] = scored[0].field;
+    }
+  }
+  return detected;
+}
 
 /**
  * Одноразовый мастер настройки (US1 часть 1 + US2). Спрашивает ID каждой связанной таблицы и
@@ -765,10 +853,35 @@ async function runWizard(sdk) {
   const tables = {};
 
   for (const key of Object.keys(TABLE_LABELS)) {
-    const id = (await input.textAsync(`ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
-    const datasheet = await space.getDatasheetAsync(id);
+    let id;
+    let datasheet;
+    if (key === 'applications') {
+      // Авто-детект (см. PLAN.md#авто-детект-текущей-таблицы): виджет предполагается установленным
+      // прямо в датасете "Заявки" — space.getActiveDatasheetAsync() возвращает именно его, без
+      // необходимости просить пользователя вручную вводить ID таблицы, в которой он и так сейчас
+      // находится (TABLE_LABELS уже называл её "текущая таблица" — теперь код это подтверждает).
+      datasheet = await space.getActiveDatasheetAsync();
+      if (!datasheet) {
+        // Фолбэк на случай нестандартной установки (например, локальный mock без активного датасета
+        // или платформа временно не отдаёт активный датасет) — не блокируем мастер целиком.
+        id = (await input.textAsync(`Не удалось определить текущую таблицу автоматически. ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
+        datasheet = await space.getDatasheetAsync(id);
+      } else {
+        id = datasheet.id;
+        output.text(`«${TABLE_LABELS[key]}»: определена автоматически как текущая таблица (${id}).`);
+      }
+    } else {
+      id = (await input.textAsync(`ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
+      datasheet = await space.getDatasheetAsync(id);
+    }
+    const autoDetected = await detectFieldsByContent(datasheet, wizardRoles[key]);
     const fields = {};
     for (const role of wizardRoles[key]) {
+      if (autoDetected[role]) {
+        fields[role] = autoDetected[role].id;
+        output.text(`«${TABLE_LABELS[key]}»: поле для роли «${role}» определено автоматически по содержимому значений — «${autoDetected[role].name}».`);
+        continue;
+      }
       const field = await input.fieldAsync(`«${TABLE_LABELS[key]}»: какое поле соответствует роли «${role}»?`, datasheet);
       fields[role] = field.id;
     }
@@ -776,9 +889,6 @@ async function runWizard(sdk) {
   }
 
   tables.config = { datasheetId: configDatasheetId };
-
-  const runsId = (await input.textAsync('ID таблицы «Copilot Runs»:')).trim();
-  tables.runs = { datasheetId: runsId };
 
   const config = {
     version: 1,
@@ -921,13 +1031,16 @@ function appCompanyKeys(app) {
   });
 }
 
-function referenceCompanyKeys(company, fieldsMap) {
+// `company` здесь — объект, уже проиндексированный по РОЛЯМ (см. recordToRoleObject в main.js),
+// а не по сырым именам полей реальной таблицы — поэтому напрямую company.inn/.email/..., без
+// какого-либо fieldsMap: сопоставление роль -> реальный ID поля уже произошло на этапе чтения записи.
+function referenceCompanyKeys(company) {
   return companyLikeKeys({
-    inn: company[fieldsMap.inn],
-    email: company[fieldsMap.email],
-    phone: company[fieldsMap.phone],
-    name: company[fieldsMap.legalName],
-    city: company[fieldsMap.city],
+    inn: company.inn,
+    email: company.email,
+    phone: company.phone,
+    name: company.legalName,
+    city: company.city,
   });
 }
 
@@ -1025,8 +1138,8 @@ function buildLinkActions(recordId, field, currentValue, scored, config, describ
 }
 
 /** @returns {Array} MatchCandidate[] (kind:"link", field:"company_link") — US9. */
-function findCompanyMatches(applications, companies, config, fieldsMap) {
-  const index = buildBlockingIndex(companies, (c) => referenceCompanyKeys(c, fieldsMap));
+function findCompanyMatches(applications, companies, config) {
+  const index = buildBlockingIndex(companies, (c) => referenceCompanyKeys(c));
   const actions = [];
   for (const app of applications) {
     if (app.company_link) continue; // уже связано — не перетираем без явного rematch (план п.6)
@@ -1055,16 +1168,17 @@ function describeEmployeeSignals(signals) {
  * (кого хочет видеть исполнителем сам заказчик) приоритетнее requester_fio_raw (это просто контакт,
  * обычно внешний человек, а не сотрудник — но иногда совпадает, поэтому не отбрасываем).
  */
-function findEmployeeMatches(applications, employees, config, fieldsMap) {
+function findEmployeeMatches(applications, employees, config) {
   const byEmail = new Map();
   const byPhone = new Map();
   const byFirstChar = new Map();
   const records = new Map();
 
+  // `e` здесь — объект по РОЛЯМ (recordToRoleObject), не по сырым именам полей таблицы.
   for (const e of employees) {
-    const email = normalizeEmail(e[fieldsMap.email]).value;
-    const phone = phoneLast10(e[fieldsMap.phone]);
-    const normalizedFio = normalizeYoAndCase(e[fieldsMap.fio] || '');
+    const email = normalizeEmail(e.email).value;
+    const phone = phoneLast10(e.phone);
+    const normalizedFio = normalizeYoAndCase(e.fio || '');
     records.set(e.id, { email, phone, normalizedFio });
     if (email) addToBucket(byEmail, email, e.id);
     if (phone) addToBucket(byPhone, phone, e.id);
@@ -1251,8 +1365,10 @@ if (typeof module !== 'undefined') {
 
 // См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js.
 let utilLib;
+let schemaLib;
 
   utilLib = globalThis.CopilotLib.helpers;
+  schemaLib = globalThis.CopilotLib.schema;
 
 const { stringSimilarity, tokenize } = utilLib;
 
@@ -1262,15 +1378,17 @@ const { stringSimilarity, tokenize } = utilLib;
  * "знать" про остальные из dev-sample.csv.
  * @returns {Map<string, {roles: Set<string>, skills: Set<string>}>}
  */
-function buildCanonicalTypeIndex(templateRows, fieldsMap) {
+// `templateRows` — объекты по РОЛЯМ (recordToRoleObject в main.js), не по сырым именам полей
+// реальной таблицы — поэтому напрямую row.projectType/.requiredRole/..., без fieldsMap.
+function buildCanonicalTypeIndex(templateRows) {
   const index = new Map();
   for (const row of templateRows) {
-    const type = row[fieldsMap.projectType];
+    const type = row.projectType;
     if (!type) continue;
     if (!index.has(type)) index.set(type, { roles: new Set(), skills: new Set() });
     const entry = index.get(type);
-    tokenize(row[fieldsMap.requiredRole]).forEach((t) => entry.roles.add(t));
-    tokenize(row[fieldsMap.requiredSkills]).forEach((t) => entry.skills.add(t));
+    tokenize(row.requiredRole).forEach((t) => entry.roles.add(t));
+    tokenize(row.requiredSkills).forEach((t) => entry.skills.add(t));
   }
   return index;
 }
@@ -1306,20 +1424,15 @@ function describeTypeMatch(c) {
   return `совпадение с шаблоном "${c.type}" по названию (${c.nameSim.toFixed(2)}), ролям (${c.roleOverlap.toFixed(2)}) и навыкам (${c.skillOverlap.toFixed(2)})`;
 }
 
-const PRIORITY_DICTIONARY = {
-  p1: 'Критический', p2: 'Высокий', p3: 'Средний', p4: 'Низкий',
-  1: 'Критический', 2: 'Высокий', 3: 'Средний', 4: 'Низкий',
-  критический: 'Критический', высокий: 'Высокий', средний: 'Средний', низкий: 'Низкий',
-  critical: 'Критический', high: 'Высокий', medium: 'Средний', normal: 'Средний', low: 'Низкий',
-};
-
+// PRIORITY_DICTIONARY — общий источник правды в schema.js (переиспользуется и авто-детектом
+// мастера настройки по содержимому, см. config.js#CONTENT_DETECTORS).
 /** Общеупотребимые обозначения приоритета (P1..P4, рус/eng слова, 1..4) — не список из CSV, см. план. */
 function normalizePriority(raw) {
   if (raw === null || raw === undefined || String(raw).trim() === '') {
     return { value: null, confidence: 0, reason: 'empty' };
   }
   const key = String(raw).trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, '');
-  const mapped = PRIORITY_DICTIONARY[key];
+  const mapped = schemaLib.PRIORITY_DICTIONARY[key];
   if (mapped) return { value: mapped, confidence: 1, reason: `priority_raw="${raw}" -> словарь приоритетов` };
   return { value: null, confidence: 0, reason: `priority_raw="${raw}" не найдено в словаре приоритетов` };
 }
@@ -1966,6 +2079,7 @@ if (typeof module !== 'undefined') {
 // (Milestones 8-10) подключаются сюда по мере готовности.
 
 // См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js.
+let schemaLib;
 let configLib;
 let normalizeLib;
 let previewLib;
@@ -1973,6 +2087,7 @@ let matchLib;
 let classifyLib;
 let anomaliesLib;
 
+  schemaLib = globalThis.CopilotLib.schema;
   configLib = globalThis.CopilotLib.config;
   normalizeLib = globalThis.CopilotLib.normalize;
   previewLib = globalThis.CopilotLib.preview;
@@ -1981,10 +2096,36 @@ let anomaliesLib;
   anomaliesLib = globalThis.CopilotLib.anomalies;
 
 
-function recordToPlainObject(record, datasheet) {
+/**
+ * Строит plain-object записи, проиндексированный по ЛОГИЧЕСКИМ РОЛЯМ (см. schema.js#WIZARD_ROLES),
+ * а не по сырым именам полей реальной таблицы. `fieldsMap` — результат мастера настройки
+ * (config.tables.<table>.fields: {role: realFieldId}), собранный через input.fieldAsync — так вся
+ * остальная логика (normalize/match/classify/anomalies) работает с ролями, ничего не зная о том,
+ * как реальные поля называются у конкретного заказчика (US1/US2, "без жёсткой привязки к ID").
+ */
+function recordToRoleObject(record, fieldsMap) {
   const obj = { id: record.id };
-  for (const field of datasheet.fields) {
-    obj[field.name] = record.getCellValue(field.id);
+  for (const [role, fieldId] of Object.entries(fieldsMap)) {
+    obj[role] = record.getCellValue(fieldId);
+  }
+  return obj;
+}
+
+/**
+ * Заявки — особый случай: помимо "сырых" полей источника (fieldsMap, см. recordToRoleObject —
+ * реальные имена могут быть любыми, поэтому обязательно через мастер настройки), у записи есть ещё
+ * системные поля, которыми владеет САМ виджет (normalized_.../suggested_.../company_link/... — см.
+ * schema.js#SYSTEM_APPLICATION_FIELDS): их создаёт человек при разворачивании структуры (Milestone C)
+ * строго с именами по нашей схеме, поэтому для НИХ (и только для них) чтение по имени поля —
+ * не хардкод чужих данных, а наша же зафиксированная конвенция (симметрично write-пути в
+ * preview.js#resolveFieldId, который так же считает их "системными", если их нет в fieldsMap).
+ */
+function recordToApplicationObject(record, datasheet, fieldsMap) {
+  const obj = recordToRoleObject(record, fieldsMap);
+  const byName = new Map(datasheet.fields.map((f) => [f.name, f]));
+  for (const sysField of schemaLib.SYSTEM_APPLICATION_FIELDS) {
+    const field = byName.get(sysField);
+    if (field) obj[sysField] = record.getCellValue(field.id);
   }
   return obj;
 }
@@ -2017,14 +2158,15 @@ async function run(sdk) {
   const scope = await configLib.selectScope(sdk, config);
 
   const appsDatasheet = await space.getDatasheetAsync(config.tables.applications.datasheetId);
+  const applicationFields = config.tables.applications.fields;
   const records = await scope.view.getRecordsAsync(scope.recordIds ? { recordIds: scope.recordIds } : undefined);
   output.text(`Заявок в выбранном представлении: ${records.length}`);
-  const applications = records.map((r) => recordToPlainObject(r, appsDatasheet));
+  const applications = records.map((r) => recordToApplicationObject(r, appsDatasheet, applicationFields));
 
   const companiesDatasheet = await space.getDatasheetAsync(config.tables.companies.datasheetId);
   const companyFields = config.tables.companies.fields;
-  const companies = (await companiesDatasheet.getRecordsAsync()).map((r) => recordToPlainObject(r, companiesDatasheet));
-  const knownCities = [...new Set(companies.map((c) => c[companyFields.city]).filter(Boolean))];
+  const companies = (await companiesDatasheet.getRecordsAsync()).map((r) => recordToRoleObject(r, companyFields));
+  const knownCities = [...new Set(companies.map((c) => c.city).filter(Boolean))];
 
   // --- Milestone 3: нормализация ---
   const normalizeSuggestions = normalizeLib.buildNormalizationSuggestions(applications, config, { knownCities });
@@ -2035,10 +2177,10 @@ async function run(sdk) {
   // --- Milestone 5: дедуп и сопоставление со справочниками ---
   const employeesDatasheet = await space.getDatasheetAsync(config.tables.employees.datasheetId);
   const employeeFields = config.tables.employees.fields;
-  const employees = (await employeesDatasheet.getRecordsAsync()).map((r) => recordToPlainObject(r, employeesDatasheet));
+  const employees = (await employeesDatasheet.getRecordsAsync()).map((r) => recordToRoleObject(r, employeeFields));
 
-  const companyActions = matchLib.findCompanyMatches(applications, companies, config, companyFields);
-  const employeeActions = matchLib.findEmployeeMatches(applications, employees, config, employeeFields);
+  const companyActions = matchLib.findCompanyMatches(applications, companies, config);
+  const employeeActions = matchLib.findEmployeeMatches(applications, employees, config);
   const { candidates: duplicateActions } = matchLib.findApplicationDuplicates(applications, config);
   const matchActions = [...companyActions, ...employeeActions, ...duplicateActions];
   output.text(`Сопоставление: компании ${companyActions.length}, сотрудники ${employeeActions.length}, дубли заявок ${duplicateActions.length}`);
@@ -2047,8 +2189,9 @@ async function run(sdk) {
 
   // --- Milestone 6: классификация типа и приоритета ---
   const templatesDatasheet = await space.getDatasheetAsync(config.tables.templates.datasheetId);
-  const templates = (await templatesDatasheet.getRecordsAsync()).map((r) => recordToPlainObject(r, templatesDatasheet));
-  const typeIndex = classifyLib.buildCanonicalTypeIndex(templates, config.tables.templates.fields);
+  const templateFields = config.tables.templates.fields;
+  const templates = (await templatesDatasheet.getRecordsAsync()).map((r) => recordToRoleObject(r, templateFields));
+  const typeIndex = classifyLib.buildCanonicalTypeIndex(templates);
   const { actions: classifyActions } = classifyLib.classifyApplications(applications, typeIndex, config);
   output.text(`Классификация: предложений ${classifyActions.length} (канонических типов в справочнике: ${typeIndex.size})`);
   const classifyResult = await previewLib.runPreviewCycle(sdk, classifyActions, config, { groupLabel: 'классификация' });

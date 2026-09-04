@@ -57,13 +57,16 @@ function appCompanyKeys(app) {
   });
 }
 
-function referenceCompanyKeys(company, fieldsMap) {
+// `company` здесь — объект, уже проиндексированный по РОЛЯМ (см. recordToRoleObject в main.js),
+// а не по сырым именам полей реальной таблицы — поэтому напрямую company.inn/.email/..., без
+// какого-либо fieldsMap: сопоставление роль -> реальный ID поля уже произошло на этапе чтения записи.
+function referenceCompanyKeys(company) {
   return companyLikeKeys({
-    inn: company[fieldsMap.inn],
-    email: company[fieldsMap.email],
-    phone: company[fieldsMap.phone],
-    name: company[fieldsMap.legalName],
-    city: company[fieldsMap.city],
+    inn: company.inn,
+    email: company.email,
+    phone: company.phone,
+    name: company.legalName,
+    city: company.city,
   });
 }
 
@@ -161,8 +164,8 @@ function buildLinkActions(recordId, field, currentValue, scored, config, describ
 }
 
 /** @returns {Array} MatchCandidate[] (kind:"link", field:"company_link") — US9. */
-function findCompanyMatches(applications, companies, config, fieldsMap) {
-  const index = buildBlockingIndex(companies, (c) => referenceCompanyKeys(c, fieldsMap));
+function findCompanyMatches(applications, companies, config) {
+  const index = buildBlockingIndex(companies, (c) => referenceCompanyKeys(c));
   const actions = [];
   for (const app of applications) {
     if (app.company_link) continue; // уже связано — не перетираем без явного rematch (план п.6)
@@ -191,16 +194,17 @@ function describeEmployeeSignals(signals) {
  * (кого хочет видеть исполнителем сам заказчик) приоритетнее requester_fio_raw (это просто контакт,
  * обычно внешний человек, а не сотрудник — но иногда совпадает, поэтому не отбрасываем).
  */
-function findEmployeeMatches(applications, employees, config, fieldsMap) {
+function findEmployeeMatches(applications, employees, config) {
   const byEmail = new Map();
   const byPhone = new Map();
   const byFirstChar = new Map();
   const records = new Map();
 
+  // `e` здесь — объект по РОЛЯМ (recordToRoleObject), не по сырым именам полей таблицы.
   for (const e of employees) {
-    const email = normalizeEmail(e[fieldsMap.email]).value;
-    const phone = phoneLast10(e[fieldsMap.phone]);
-    const normalizedFio = normalizeYoAndCase(e[fieldsMap.fio] || '');
+    const email = normalizeEmail(e.email).value;
+    const phone = phoneLast10(e.phone);
+    const normalizedFio = normalizeYoAndCase(e.fio || '');
     records.set(e.id, { email, phone, normalizedFio });
     if (email) addToBucket(byEmail, email, e.id);
     if (phone) addToBucket(byPhone, phone, e.id);

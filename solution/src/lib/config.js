@@ -40,13 +40,16 @@ const DEFAULT_THRESHOLDS = {
   classifyManualLow: 0.3, // ниже — классификатор не предлагает вообще (слишком мало сигналов)
 };
 
+// Только таблицы, которые реально читает уже реализованная логика (Milestones 1-7). "Проекты",
+// "Задачи" и "Copilot Runs" в схеме предусмотрены (см. PLAN.md#целевая-структура-данных-в-mws-tables),
+// но ни одно место в коде их пока не читает (Milestones 8-10 не реализованы) — спрашивать про них
+// сейчас бессмысленно и утомительно; появятся в мастере, когда те milestone'ы будут готовы (тогда
+// же добавится поддержка команды "reconfigure" для их первого заполнения без потери уже введённого).
 const TABLE_LABELS = {
   applications: 'Заявки (текущая таблица)',
   companies: 'Компании',
   employees: 'Сотрудники',
   templates: 'Шаблоны задач',
-  projects: 'Проекты',
-  tasks: 'Задачи',
 };
 
 function readCache() {
@@ -84,13 +87,74 @@ function clearCache() {
 // собственным `const WIZARD_ROLES` внутри schema.js в общей области видимости — назвал локальную
 // переменную иначе (wizardRoles) специально, чтобы не плодить одноимённые объявления.
 let schemaLib;
+let normalizeLib;
 if (typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__) {
   // eslint-disable-next-line global-require
   schemaLib = require('./schema');
+  // eslint-disable-next-line global-require
+  normalizeLib = require('./normalize');
 } else {
   schemaLib = globalThis.CopilotLib.schema;
+  normalizeLib = globalThis.CopilotLib.normalize;
 }
 const wizardRoles = schemaLib.WIZARD_ROLES;
+
+// Авто-определение поля мастером настройки ПО СОДЕРЖИМОМУ значений (не по названию поля — реальное
+// название может быть каким угодно, см. обсуждение в PLAN.md#авто-детект-по-содержимому). Только для
+// ролей с узнаваемым, ОДНОЗНАЧНЫМ форматом, который не путается с другими полями заявки: валюта
+// (по словарю кодов/слов) и приоритет (по словарю). Email/телефон/даты НЕ сюда — у заявки их по паре
+// (компания vs заявитель, начало vs конец), формат одинаковый у обоих, содержимое не скажет какое из
+// двух какое. budget_raw ТОЖЕ не сюда — эмпирически: normalizeBudget слишком охотно "распознаёт"
+// любое число после зачистки нецифровых символов, коллизирует с датами/длительностью/ID (проверено
+// на dev-sample.csv — 30/30 совпадений budget-детектора нашлось сразу в 4 других полях), margin-проверка
+// ниже это отсекла — не ошиблась, но и не помогла: пришлось бы держать порог настолько строгим, что
+// он бы никогда не сработал. Спрашивается явно, как раньше.
+const CONTENT_DETECTORS = {
+  currency_raw: (v) => normalizeLib.normalizeCurrency(v).confidence > 0,
+  priority_raw: (v) => Boolean(schemaLib.PRIORITY_DICTIONARY[
+    String(v).trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, '')
+  ]),
+};
+const CONTENT_DETECT_SAMPLE_SIZE = 30;
+const CONTENT_DETECT_MIN_SCORE = 0.6; // доля образцов, распознанных детектором — ниже не уверены
+const CONTENT_DETECT_MIN_MARGIN = 0.2; // отрыв от второго кандидата — иначе два поля неотличимы
+
+/**
+ * Пытается для каждой роли из `roles`, у которой есть детектор в CONTENT_DETECTORS, найти РОВНО
+ * ОДНО явно лучшее поле по значениям первых записей датасета. Возвращает {role: Field} только для
+ * уверенных однозначных совпадений — если кандидатов несколько с похожим счётом или уверенность
+ * ниже порога, роль в результат не попадает и будет спрошена явно через input.fieldAsync, как обычно.
+ * Ничего не решает по имени поля — только по факту, что бОльшая часть его значений распознаётся
+ * как ожидаемый формат (см. solution/src/lib/normalize.js).
+ */
+async function detectFieldsByContent(datasheet, roles) {
+  const detectableRoles = roles.filter((r) => CONTENT_DETECTORS[r]);
+  if (detectableRoles.length === 0) return {};
+
+  const allRecords = await datasheet.getRecordsAsync();
+  const sample = allRecords.slice(0, CONTENT_DETECT_SAMPLE_SIZE);
+  if (sample.length === 0) return {};
+
+  const valuesByFieldId = new Map(
+    datasheet.fields.map((f) => [f.id, sample.map((r) => r.getCellValue(f.id))]),
+  );
+
+  const detected = {};
+  for (const role of detectableRoles) {
+    const scored = datasheet.fields
+      .map((field) => {
+        const values = valuesByFieldId.get(field.id).filter((v) => v !== null && v !== undefined && String(v).trim() !== '');
+        const score = values.length === 0 ? 0 : values.filter(CONTENT_DETECTORS[role]).length / values.length;
+        return { field, score };
+      })
+      .filter((x) => x.score >= CONTENT_DETECT_MIN_SCORE)
+      .sort((a, b) => b.score - a.score);
+    if (scored.length === 1 || (scored.length > 1 && scored[0].score - scored[1].score >= CONTENT_DETECT_MIN_MARGIN)) {
+      detected[role] = scored[0].field;
+    }
+  }
+  return detected;
+}
 
 /**
  * Одноразовый мастер настройки (US1 часть 1 + US2). Спрашивает ID каждой связанной таблицы и
@@ -106,10 +170,35 @@ async function runWizard(sdk) {
   const tables = {};
 
   for (const key of Object.keys(TABLE_LABELS)) {
-    const id = (await input.textAsync(`ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
-    const datasheet = await space.getDatasheetAsync(id);
+    let id;
+    let datasheet;
+    if (key === 'applications') {
+      // Авто-детект (см. PLAN.md#авто-детект-текущей-таблицы): виджет предполагается установленным
+      // прямо в датасете "Заявки" — space.getActiveDatasheetAsync() возвращает именно его, без
+      // необходимости просить пользователя вручную вводить ID таблицы, в которой он и так сейчас
+      // находится (TABLE_LABELS уже называл её "текущая таблица" — теперь код это подтверждает).
+      datasheet = await space.getActiveDatasheetAsync();
+      if (!datasheet) {
+        // Фолбэк на случай нестандартной установки (например, локальный mock без активного датасета
+        // или платформа временно не отдаёт активный датасет) — не блокируем мастер целиком.
+        id = (await input.textAsync(`Не удалось определить текущую таблицу автоматически. ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
+        datasheet = await space.getDatasheetAsync(id);
+      } else {
+        id = datasheet.id;
+        output.text(`«${TABLE_LABELS[key]}»: определена автоматически как текущая таблица (${id}).`);
+      }
+    } else {
+      id = (await input.textAsync(`ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
+      datasheet = await space.getDatasheetAsync(id);
+    }
+    const autoDetected = await detectFieldsByContent(datasheet, wizardRoles[key]);
     const fields = {};
     for (const role of wizardRoles[key]) {
+      if (autoDetected[role]) {
+        fields[role] = autoDetected[role].id;
+        output.text(`«${TABLE_LABELS[key]}»: поле для роли «${role}» определено автоматически по содержимому значений — «${autoDetected[role].name}».`);
+        continue;
+      }
       const field = await input.fieldAsync(`«${TABLE_LABELS[key]}»: какое поле соответствует роли «${role}»?`, datasheet);
       fields[role] = field.id;
     }
@@ -117,9 +206,6 @@ async function runWizard(sdk) {
   }
 
   tables.config = { datasheetId: configDatasheetId };
-
-  const runsId = (await input.textAsync('ID таблицы «Copilot Runs»:')).trim();
-  tables.runs = { datasheetId: runsId };
 
   const config = {
     version: 1,

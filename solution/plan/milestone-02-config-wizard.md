@@ -25,23 +25,28 @@ US1 просит не только «сопоставить поля» (одно
 
 ## Что делает
 
-1. Спрашивает (`input.textAsync`) ID датасета «⚙️ Copilot Config». Пробует прочитать в нём существующий конфиг; если пусто — идёт мастер по шагу 2.
-2. Для каждой из 5 связанных таблиц (Компании/Сотрудники/Шаблоны задач/Проекты/Задачи) — `input.textAsync` на ID датасета → `space.getDatasheetAsync`.
-3. Для каждой логической роли поля в каждой таблице — `input.fieldAsync(label, datasheet)` (полный список ролей — см. таблицу ниже).
-4. Спрашивает пороги уверенности (или использует дефолты без вопроса, если пользователь не хочет менять — см. критерий готовности).
-5. Сохраняет итог как JSON в записи Config-датасета, кэширует ID Config-датасета в `localStorage` (в mock — эмулируется файлом, см. Milestone 1).
-6. Команда `"reconfigure"`, введённая вместо любого текстового ответа в основном сценарии, прерывает текущий прогон и перезапускает мастер с шага 2.
+1. Спрашивает (`input.textAsync`) ID датасета «Copilot Config». Пробует прочитать в нём существующий конфиг; если пусто — идёт мастер по шагу 2.
+2. Таблица «Заявки» — не спрашивается текстом: определяется автоматически через `space.getActiveDatasheetAsync()` (виджет установлен внутри неё), с фолбэком на `input.textAsync` только если активный датасет не определился. Обоснование и ограничения — `solution/PLAN.md#авто-детект-текущей-таблицы`.
+3. Только для таблиц, которые реально нужны уже реализованным Milestones 1-7 (Компании/Сотрудники/Шаблоны задач) — `input.textAsync` на ID датасета → `space.getDatasheetAsync`. «Проекты», «Задачи» и «Copilot Runs» — НЕ спрашиваются вообще (не читаются никаким текущим кодом, появятся вместе с Milestones 8-10, см. `solution/PLAN.md#авто-детект-текущей-таблицы`).
+4. Для каждой логической роли поля в каждой таблице (включая «Заявки», но только для ролей, реально используемых Milestones 1-7 — см. таблицу ниже) — сначала пробует авто-детект **по содержимому значений** первых ~30 записей (`config.js#detectFieldsByContent`: только для `currency_raw`/`priority_raw` — узнаваемый словарём формат, который не путается с другими полями); если не сработало (или роль не входит в число авто-детектируемых) — `input.fieldAsync(label, datasheet)`.
+5. Спрашивает пороги уверенности (или использует дефолты без вопроса, если пользователь не хочет менять — см. критерий готовности).
+6. Сохраняет итог как JSON в записи Config-датасета, кэширует ID Config-датасета в `localStorage` (в mock — эмулируется файлом, см. Milestone 1).
+7. Команда `"reconfigure"`, введённая вместо любого текстового ответа в основном сценарии, прерывает текущий прогон и перезапускает мастер с шага 2.
 
-### Полный список логических ролей полей, которые мастер обязан спросить
+### Список логических ролей полей, которые мастер СЕЙЧАС спрашивает
+
+Только то, что реально читает уже реализованный код (Milestones 1-7) — не полная схема из `PLAN.md#целевая-структура-данных-в-mws-tables`. `⚡` — авто-детект по содержимому, вопроса не будет, если сработает.
 
 | Таблица | Роли полей |
 |---|---|
 | Компании | `inn`, `email`, `phone`, `city`, `aliases`, `legalName`, `active` |
 | Сотрудники | `fio`, `email`, `phone`, `role`, `skills`, `specializations`, `capacityHoursWeek`, `currentLoadPct`, `absentFrom`, `absentTo`, `active` |
 | Шаблоны задач | `projectType`, `taskCode`, `taskName`, `order`, `durationHours`, `requiredRole`, `requiredSkills`, `predecessorCode`, `defaultPriority`, `mandatory` |
-| Проекты | `projectName`, `projectType`, `priority`, `budget`, `currency`, `plannedStart`, `plannedEnd`, `status`, `companyLink` |
-| Задачи | `taskName`, `status`, `priority`, `projectLink`, `assigneeLink`, `estimatedHours`, `dueDate`, `requiredRole`, `requiredSkills`, `sourceKey`, `blockedByLink` |
-| Заявки (своя же таблица) | все `*_raw` роли + `company_link`, `employee_link`, `project_link`, `duplicate_link`, `duplicate_group_id`, `suggested_project_type`, `suggested_priority`, `match_confidence`, `match_reason`, `anomaly_flags`, `anomaly_notes`, `readiness_status`, `_processed_hash`, `_last_run_id` |
+| Заявки (своя же таблица) | `application_id_raw`, `project_name_raw`, `company_name_raw`, `company_inn_raw`, `company_email_raw`, `company_phone_raw`, `company_city_raw`, `requester_fio_raw`, `requester_email_raw`, `requester_phone_raw`, `project_type_raw`, `priority_raw`⚡, `budget_raw`, `currency_raw`⚡, `planned_start_raw`, `planned_end_raw`, `duration_raw`, `required_roles_raw`, `required_skills_raw`, `preferred_assignee_raw`, `project_status_raw` |
+
+Не спрашиваются вообще (см. `schema.js#APPLICATION_UNUSED_RAW_FIELDS`): `project_description_raw`, `sla_raw`, `source_channel_raw`, `external_reference_raw`, `parent_project_raw`, `comment_raw`, `created_at_raw`, `updated_at_raw`, `source_system`, `source_row_key` — описательный текст/метаданные источника, ни normalize/match/classify/anomalies их не читают. Системные поля Заявок (`normalized_*`, `suggested_*`, `company_link` и т.п.) тоже не спрашиваются — ими владеет сам виджет, читаются/пишутся по имени поля (см. `main.js#recordToApplicationObject`, `preview.js#resolveFieldId`), а не через мастер.
+
+Таблицы «Проекты» и «Задачи» (роли `projectName`/`taskName`/... — см. `schema.js`) сохранены в исходниках как задел под Milestones 8-10, но НЕ входят в `TABLE_LABELS` — мастер про них не спрашивает вообще, пока эти milestone'ы не реализованы.
 
 ## Выход
 

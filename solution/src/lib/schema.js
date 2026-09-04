@@ -58,17 +58,42 @@ const PROJECT_TARGET_FIELDS = [
 // Аналогично — поля "Задач", которыми управляет виджет (Link-поля + идемпотентность), а не CSV.
 const TASK_TARGET_EXTRA_FIELDS = ['project_link', 'assignee_link', 'source_key', 'blocked_by_link'];
 
+// Роли "Заявок", которые мастер настройки реально спрашивает — подмножество APPLICATION_RAW_FIELDS:
+// сюда НЕ входят роли, которые ни одно место в уже реализованном коде (Milestones 1-7) не читает —
+// спрашивать про них сейчас бессмысленно (по мере реализации Milestones 8-10 сюда добавится то, что
+// им понадобится, и пользователь один раз пройдёт "reconfigure"). Список того, что не используется
+// СЕЙЧАС — не "никогда не будет": project_description_raw/sla_raw/comment_raw — описательный текст,
+// не участвующий в правилах; source_channel_raw/external_reference_raw/parent_project_raw/
+// source_system/source_row_key — метаданные источника, нужны будущим Milestone 8-10 (создание
+// задач/проекта, но не самим normalize/match/classify/anomalies); created_at_raw/updated_at_raw —
+// нужны будущему отчёту (Milestone 10), не текущим правилам качества данных.
+const APPLICATION_UNUSED_RAW_FIELDS = new Set([
+  'project_description_raw', 'sla_raw', 'source_channel_raw', 'external_reference_raw',
+  'parent_project_raw', 'comment_raw', 'created_at_raw', 'updated_at_raw', 'source_system', 'source_row_key',
+]);
+
 // Логические роли полей, которые мастер настройки (Milestone 2) обязан спросить у пользователя —
 // см. solution/plan/milestone-02-config-wizard.md. В реальном MWS названия полей могут отличаться
 // от наших raw-колонок, поэтому это отдельный список "ролей", а не просто алиас APPLICATION_RAW_FIELDS
 // и т.п. (для applications роли совпадают с raw-колонками, т.к. это и есть исходные поля).
+//
+// "Проекты" и "Задачи" НЕТ в этом объекте вообще — ни одно место в уже реализованном коде их не
+// читает (Milestones 8-10 не реализованы), см. также solution/src/lib/config.js#TABLE_LABELS.
 const WIZARD_ROLES = {
-  applications: APPLICATION_RAW_FIELDS.slice(),
+  applications: APPLICATION_RAW_FIELDS.filter((f) => !APPLICATION_UNUSED_RAW_FIELDS.has(f)),
   companies: ['inn', 'email', 'phone', 'city', 'aliases', 'legalName', 'active'],
   employees: ['fio', 'email', 'phone', 'role', 'skills', 'specializations', 'capacityHoursWeek', 'currentLoadPct', 'absentFrom', 'absentTo', 'active'],
   templates: ['projectType', 'taskCode', 'taskName', 'order', 'durationHours', 'requiredRole', 'requiredSkills', 'predecessorCode', 'defaultPriority', 'mandatory'],
-  projects: ['projectName', 'projectType', 'priority', 'budget', 'currency', 'plannedStart', 'plannedEnd', 'status', 'companyLink'],
-  tasks: ['taskName', 'status', 'priority', 'projectLink', 'assigneeLink', 'estimatedHours', 'dueDate', 'requiredRole', 'requiredSkills', 'sourceKey', 'blockedByLink'],
+};
+
+// Общий словарь приоритета (рус/eng слова, P1..P4, 1..4) — общедоменное знание, не список из CSV
+// (см. PLAN.md#данные). Используется и классификатором (Milestone 6), и авто-детектом мастера
+// настройки по содержимому (Milestone 2) — единственный источник правды, чтобы не разойтись.
+const PRIORITY_DICTIONARY = {
+  p1: 'Критический', p2: 'Высокий', p3: 'Средний', p4: 'Низкий',
+  1: 'Критический', 2: 'Высокий', 3: 'Средний', 4: 'Низкий',
+  критический: 'Критический', высокий: 'Высокий', средний: 'Средний', низкий: 'Низкий',
+  critical: 'Критический', high: 'Высокий', medium: 'Средний', normal: 'Средний', low: 'Низкий',
 };
 
 // Поля на "Заявках", которыми владеет сам виджет (пишет их, не спрашивает про них в мастере).
@@ -93,6 +118,7 @@ const schema = {
   TASK_TARGET_EXTRA_FIELDS,
   WIZARD_ROLES,
   SYSTEM_APPLICATION_FIELDS,
+  PRIORITY_DICTIONARY,
 };
 
 // Milestone 11: под Node — обычный module.exports; в бандле для MWS (после сборки build.js, где

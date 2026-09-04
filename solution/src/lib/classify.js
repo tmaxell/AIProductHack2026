@@ -5,11 +5,15 @@
 
 // См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js.
 let utilLib;
+let schemaLib;
 if (typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__) {
   // eslint-disable-next-line global-require
   utilLib = require('./helpers');
+  // eslint-disable-next-line global-require
+  schemaLib = require('./schema');
 } else {
   utilLib = globalThis.CopilotLib.helpers;
+  schemaLib = globalThis.CopilotLib.schema;
 }
 const { stringSimilarity, tokenize } = utilLib;
 
@@ -19,15 +23,17 @@ const { stringSimilarity, tokenize } = utilLib;
  * "знать" про остальные из dev-sample.csv.
  * @returns {Map<string, {roles: Set<string>, skills: Set<string>}>}
  */
-function buildCanonicalTypeIndex(templateRows, fieldsMap) {
+// `templateRows` — объекты по РОЛЯМ (recordToRoleObject в main.js), не по сырым именам полей
+// реальной таблицы — поэтому напрямую row.projectType/.requiredRole/..., без fieldsMap.
+function buildCanonicalTypeIndex(templateRows) {
   const index = new Map();
   for (const row of templateRows) {
-    const type = row[fieldsMap.projectType];
+    const type = row.projectType;
     if (!type) continue;
     if (!index.has(type)) index.set(type, { roles: new Set(), skills: new Set() });
     const entry = index.get(type);
-    tokenize(row[fieldsMap.requiredRole]).forEach((t) => entry.roles.add(t));
-    tokenize(row[fieldsMap.requiredSkills]).forEach((t) => entry.skills.add(t));
+    tokenize(row.requiredRole).forEach((t) => entry.roles.add(t));
+    tokenize(row.requiredSkills).forEach((t) => entry.skills.add(t));
   }
   return index;
 }
@@ -63,20 +69,15 @@ function describeTypeMatch(c) {
   return `совпадение с шаблоном "${c.type}" по названию (${c.nameSim.toFixed(2)}), ролям (${c.roleOverlap.toFixed(2)}) и навыкам (${c.skillOverlap.toFixed(2)})`;
 }
 
-const PRIORITY_DICTIONARY = {
-  p1: 'Критический', p2: 'Высокий', p3: 'Средний', p4: 'Низкий',
-  1: 'Критический', 2: 'Высокий', 3: 'Средний', 4: 'Низкий',
-  критический: 'Критический', высокий: 'Высокий', средний: 'Средний', низкий: 'Низкий',
-  critical: 'Критический', high: 'Высокий', medium: 'Средний', normal: 'Средний', low: 'Низкий',
-};
-
+// PRIORITY_DICTIONARY — общий источник правды в schema.js (переиспользуется и авто-детектом
+// мастера настройки по содержимому, см. config.js#CONTENT_DETECTORS).
 /** Общеупотребимые обозначения приоритета (P1..P4, рус/eng слова, 1..4) — не список из CSV, см. план. */
 function normalizePriority(raw) {
   if (raw === null || raw === undefined || String(raw).trim() === '') {
     return { value: null, confidence: 0, reason: 'empty' };
   }
   const key = String(raw).trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, '');
-  const mapped = PRIORITY_DICTIONARY[key];
+  const mapped = schemaLib.PRIORITY_DICTIONARY[key];
   if (mapped) return { value: mapped, confidence: 1, reason: `priority_raw="${raw}" -> словарь приоритетов` };
   return { value: null, confidence: 0, reason: `priority_raw="${raw}" не найдено в словаре приоритетов` };
 }
