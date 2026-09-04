@@ -6,6 +6,7 @@ Thumbs.db
 .codex-log/
 *.swp
 *~
+~$*
 
 # Secrets and local configuration
 .env
