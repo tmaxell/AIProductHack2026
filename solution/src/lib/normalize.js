@@ -358,8 +358,14 @@ function buildNormalizationSuggestions(applications, config, runtimeContext = {}
 
     const budget = normalizeBudget(app.budget_raw, app.currency_raw);
     add(app.id, 'normalized_budget_amount', app.budget_raw, app.normalized_budget_amount, budget.changed, budget.confidence, budget.reason, budget.value);
-    if (budget.currencyCode && budget.currencyCode !== app.currency_raw) {
-      add(app.id, 'normalized_currency_code', app.currency_raw, app.normalized_currency_code, true, 0.8, 'нормализована валюта', budget.currencyCode);
+    if (budget.currencyCode) {
+      // ВАЖНО: пишем normalized_currency_code даже когда currency_raw уже совпадает с итоговым
+      // кодом ("RUB" -> "RUB") — это отдельное поле, и без записи оно остаётся пустым навсегда,
+      // из-за чего Milestone 7 (CURRENCY_UNKNOWN) ложно считал валюту нераспознанной. Идемпотентность
+      // всё равно обеспечивает add() сравнением с ТЕКУЩИМ normalized_currency_code, а не с currency_raw.
+      const currencyChanged = budget.currencyCode !== app.currency_raw;
+      const currencyReason = currencyChanged ? 'нормализована валюта' : `валюта распознана как ${budget.currencyCode}`;
+      add(app.id, 'normalized_currency_code', app.currency_raw, app.normalized_currency_code, true, 0.8, currencyReason, budget.currencyCode);
     }
 
     const city = normalizeCity(app.company_city_raw, knownCities);
@@ -397,4 +403,10 @@ const normalizeModule = {
   buildNormalizationSuggestions,
 };
 
-if (typeof module !== 'undefined') module.exports = normalizeModule;
+// См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js (тот же паттерн везде).
+if (typeof module !== 'undefined') {
+  module.exports = normalizeModule;
+} else {
+  globalThis.CopilotLib = globalThis.CopilotLib || {};
+  globalThis.CopilotLib.normalize = normalizeModule;
+}

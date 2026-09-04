@@ -65,7 +65,7 @@ const TASK_TARGET_EXTRA_FIELDS = ['project_link', 'assignee_link', 'source_key',
 const WIZARD_ROLES = {
   applications: APPLICATION_RAW_FIELDS.slice(),
   companies: ['inn', 'email', 'phone', 'city', 'aliases', 'legalName', 'active'],
-  employees: ['email', 'phone', 'role', 'skills', 'specializations', 'capacityHoursWeek', 'currentLoadPct', 'absentFrom', 'absentTo', 'active'],
+  employees: ['fio', 'email', 'phone', 'role', 'skills', 'specializations', 'capacityHoursWeek', 'currentLoadPct', 'absentFrom', 'absentTo', 'active'],
   templates: ['projectType', 'taskCode', 'taskName', 'order', 'durationHours', 'requiredRole', 'requiredSkills', 'predecessorCode', 'defaultPriority', 'mandatory'],
   projects: ['projectName', 'projectType', 'priority', 'budget', 'currency', 'plannedStart', 'plannedEnd', 'status', 'companyLink'],
   tasks: ['taskName', 'status', 'priority', 'projectLink', 'assigneeLink', 'estimatedHours', 'dueDate', 'requiredRole', 'requiredSkills', 'sourceKey', 'blockedByLink'],
@@ -77,7 +77,7 @@ const SYSTEM_APPLICATION_FIELDS = [
   'normalized_company_email', 'normalized_requester_email', 'normalized_company_phone', 'normalized_requester_phone',
   'normalized_planned_start', 'normalized_planned_end', 'normalized_budget_amount', 'normalized_currency_code',
   'normalized_city', 'normalized_company_name', 'normalized_requester_fio',
-  'company_link', 'project_link', 'duplicate_link', 'duplicate_group_id',
+  'company_link', 'employee_link', 'project_link', 'duplicate_link', 'duplicate_group_id',
   'suggested_project_type', 'suggested_priority', 'match_confidence', 'match_reason',
   'anomaly_flags', 'anomaly_notes', 'readiness_status',
   '_processed_hash', '_last_run_id',
@@ -95,4 +95,13 @@ const schema = {
   SYSTEM_APPLICATION_FIELDS,
 };
 
-if (typeof module !== 'undefined') module.exports = schema;
+// Milestone 11: под Node — обычный module.exports; в бандле для MWS (после сборки build.js, где
+// каждый файл обёрнут в свою IIFE — см. solution/plan/milestone-11-build-tests.md) module не
+// определён, и модуль кладёт себя в общий неймспейс, чтобы другие обёрнутые файлы могли его найти
+// без деклараций одноимённых переменных в общей области видимости (которые иначе конфликтовали бы).
+if (typeof module !== 'undefined') {
+  module.exports = schema;
+} else {
+  globalThis.CopilotLib = globalThis.CopilotLib || {};
+  globalThis.CopilotLib.schema = schema;
+}

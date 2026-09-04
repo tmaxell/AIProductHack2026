@@ -5,13 +5,17 @@
 // Один и тот же run() работает и под mock-SDK (devtools/run-local.js), и под реальным MWS —
 // последняя строка файла решает, что вызывать в реальном рантайме.
 //
-// Сейчас (Milestones 1-4) реализована только первая часть сквозного сценария: настройка ->
-// выбор scope -> нормализация -> preview/apply. Дедуп/классификация/аномалии/задачи/назначение/
-// запуск (Milestones 5-10) подключаются сюда по мере готовности.
+// Реализованы Milestones 1-7: настройка -> выбор scope -> нормализация -> дедуп/сопоставление
+// со справочниками -> классификация -> базовые аномалии. Задачи/назначение/запуск/отчёт
+// (Milestones 8-10) подключаются сюда по мере готовности.
 
+// См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js.
 let configLib;
 let normalizeLib;
 let previewLib;
+let matchLib;
+let classifyLib;
+let anomaliesLib;
 if (typeof require === 'function') {
   // eslint-disable-next-line global-require
   configLib = require('../lib/config');
@@ -19,11 +23,19 @@ if (typeof require === 'function') {
   normalizeLib = require('../lib/normalize');
   // eslint-disable-next-line global-require
   previewLib = require('../lib/preview');
+  // eslint-disable-next-line global-require
+  matchLib = require('../lib/match');
+  // eslint-disable-next-line global-require
+  classifyLib = require('../lib/classify');
+  // eslint-disable-next-line global-require
+  anomaliesLib = require('../lib/anomalies');
 } else {
-  // после конкатенации в браузерный бандл (Milestone 11) модули уже объявлены в общей области видимости
-  configLib = { loadOrCreateConfig, saveConfig, runWizard, selectScope }; // eslint-disable-line no-undef
-  normalizeLib = { buildNormalizationSuggestions }; // eslint-disable-line no-undef
-  previewLib = { runPreviewCycle }; // eslint-disable-line no-undef
+  configLib = globalThis.CopilotLib.config;
+  normalizeLib = globalThis.CopilotLib.normalize;
+  previewLib = globalThis.CopilotLib.preview;
+  matchLib = globalThis.CopilotLib.match;
+  classifyLib = globalThis.CopilotLib.classify;
+  anomaliesLib = globalThis.CopilotLib.anomalies;
 }
 
 function recordToPlainObject(record, datasheet) {
@@ -32,6 +44,18 @@ function recordToPlainObject(record, datasheet) {
     obj[field.name] = record.getCellValue(field.id);
   }
   return obj;
+}
+
+/** После applied-действий одной фазы — обновляет ЛОКАЛЬНЫЕ объекты заявок, чтобы следующая фаза
+ * (например match после normalize) видела свежие normalized_*-значения без лишнего перечитывания
+ * датасета. */
+function mergeApplied(applications, appliedActions) {
+  const byId = new Map(applications.map((a) => [a.id, a]));
+  for (const action of appliedActions) {
+    if (action.table !== 'applications') continue;
+    const app = byId.get(action.recordId);
+    if (app) app[action.field] = action.to;
+  }
 }
 
 async function run(sdk) {
@@ -44,31 +68,66 @@ async function run(sdk) {
   const appsDatasheet = await space.getDatasheetAsync(config.tables.applications.datasheetId);
   const records = await scope.view.getRecordsAsync(scope.recordIds ? { recordIds: scope.recordIds } : undefined);
   output.text(`Заявок в выбранном представлении: ${records.length}`);
-
   const applications = records.map((r) => recordToPlainObject(r, appsDatasheet));
 
   const companiesDatasheet = await space.getDatasheetAsync(config.tables.companies.datasheetId);
   const companyFields = config.tables.companies.fields;
-  const companyRecords = await companiesDatasheet.getRecordsAsync();
-  const knownCities = [...new Set(
-    companyRecords.map((r) => r.getCellValueString(companyFields.city)).filter(Boolean),
-  )];
+  const companies = (await companiesDatasheet.getRecordsAsync()).map((r) => recordToPlainObject(r, companiesDatasheet));
+  const knownCities = [...new Set(companies.map((c) => c[companyFields.city]).filter(Boolean))];
 
-  const suggestions = normalizeLib.buildNormalizationSuggestions(applications, config, { knownCities });
-  output.text(`Сформировано предложений по нормализации: ${suggestions.length}`);
+  // --- Milestone 3: нормализация ---
+  const normalizeSuggestions = normalizeLib.buildNormalizationSuggestions(applications, config, { knownCities });
+  output.text(`Нормализация: сформировано предложений ${normalizeSuggestions.length}`);
+  const normResult = await previewLib.runPreviewCycle(sdk, normalizeSuggestions, config, { groupLabel: 'нормализация' });
+  mergeApplied(applications, normResult.applied);
 
-  const { applied, skipped } = await previewLib.runPreviewCycle(sdk, suggestions, config, { groupLabel: 'нормализация' });
+  // --- Milestone 5: дедуп и сопоставление со справочниками ---
+  const employeesDatasheet = await space.getDatasheetAsync(config.tables.employees.datasheetId);
+  const employeeFields = config.tables.employees.fields;
+  const employees = (await employeesDatasheet.getRecordsAsync()).map((r) => recordToPlainObject(r, employeesDatasheet));
 
-  output.markdown(`## Итог\n- заявок проверено: ${applications.length}\n- применено исправлений: ${applied.length}\n- пропущено: ${skipped.length}`);
+  const companyActions = matchLib.findCompanyMatches(applications, companies, config, companyFields);
+  const employeeActions = matchLib.findEmployeeMatches(applications, employees, config, employeeFields);
+  const { candidates: duplicateActions } = matchLib.findApplicationDuplicates(applications, config);
+  const matchActions = [...companyActions, ...employeeActions, ...duplicateActions];
+  output.text(`Сопоставление: компании ${companyActions.length}, сотрудники ${employeeActions.length}, дубли заявок ${duplicateActions.length}`);
+  const matchResult = await previewLib.runPreviewCycle(sdk, matchActions, config, { groupLabel: 'сопоставление со справочниками' });
+  mergeApplied(applications, matchResult.applied);
+
+  // --- Milestone 6: классификация типа и приоритета ---
+  const templatesDatasheet = await space.getDatasheetAsync(config.tables.templates.datasheetId);
+  const templates = (await templatesDatasheet.getRecordsAsync()).map((r) => recordToPlainObject(r, templatesDatasheet));
+  const typeIndex = classifyLib.buildCanonicalTypeIndex(templates, config.tables.templates.fields);
+  const { actions: classifyActions } = classifyLib.classifyApplications(applications, typeIndex, config);
+  output.text(`Классификация: предложений ${classifyActions.length} (канонических типов в справочнике: ${typeIndex.size})`);
+  const classifyResult = await previewLib.runPreviewCycle(sdk, classifyActions, config, { groupLabel: 'классификация' });
+  mergeApplied(applications, classifyResult.applied);
+
+  // --- Milestone 7: базовые проверки аномалий ---
+  const flagsByRecord = anomaliesLib.detectAnomaliesForBatch(applications);
+  const flaggedCount = [...flagsByRecord.values()].filter((flags) => flags.length > 0).length;
+  output.text(`Аномалии: заявок с хотя бы одним флагом ${flaggedCount} из ${applications.length}`);
+  const anomalyActions = anomaliesLib.buildAnomalyActions(applications, flagsByRecord);
+  const anomalyResult = await previewLib.runPreviewCycle(sdk, anomalyActions, config, { groupLabel: 'аномалии' });
+  mergeApplied(applications, anomalyResult.applied);
+
+  const summaryCounts = {
+    checked: applications.length,
+    normalizeFixed: normResult.applied.length,
+    matchLinked: matchResult.applied.length,
+    classified: classifyResult.applied.length,
+    anomaliesAcked: anomalyResult.applied.length,
+  };
+  output.markdown(`## Итог\n${Object.entries(summaryCounts).map(([k, v]) => `- ${k}: ${v}`).join('\n')}`);
 
   return {
-    checked: applications.length,
-    fixed: applied.length,
-    skippedCount: skipped.length,
-    // Полные списки — не только счётчики: нужны devtools/run-local.js, чтобы построить
-    // детальный отчёт (по каждому полю, с примерами "было -> стало" и причиной пропуска).
-    appliedActions: applied,
-    skippedActions: skipped,
+    ...summaryCounts,
+    appliedActions: [
+      ...normResult.applied, ...matchResult.applied, ...classifyResult.applied, ...anomalyResult.applied,
+    ],
+    skippedActions: [
+      ...normResult.skipped, ...matchResult.skipped, ...classifyResult.skipped, ...anomalyResult.skipped,
+    ],
   };
 }
 

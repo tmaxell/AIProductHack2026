@@ -156,9 +156,25 @@ class Space {
   }
 }
 
-function createScriptedInput(answers) {
+// Вопросы preview-движка (Milestone 4) повторяются по разу на каждую фазу (нормализация/
+// сопоставление/классификация/аномалии/...), и заранее неизвестно, сколько раз в конкретном
+// прогоне у фазы реально найдётся авто- и/или ручная группа — это зависит от данных. Жёстко
+// зафиксированная позиция в очереди ответов для ЭТИХ конкретных вопросов не масштабируется на
+// растущее число фаз, поэтому они узнаются по тексту вопроса (он контролируется нами же, в
+// preview.js) и по умолчанию отвечаются разумным дефолтом, а не берутся из очереди — иначе
+// написание фикстуры ответов для каждого нового milestone превращалось бы в угадайку.
+const AUTO_QUESTION_RE = /Какие строки применить/;
+const MANUAL_QUESTION_RE = /Для каждой неоднозначной строки/;
+
+function createScriptedInput(answers, opts = {}) {
   const queue = [...answers];
+  const autoConfirmPreview = opts.autoConfirmPreview !== false;
+
   function next(label) {
+    if (autoConfirmPreview) {
+      if (AUTO_QUESTION_RE.test(label)) return 'all';
+      if (MANUAL_QUESTION_RE.test(label)) return '';
+    }
     if (queue.length === 0) throw new Error(`Нет заготовленного ответа для вопроса: "${label}"`);
     return queue.shift();
   }
@@ -232,11 +248,16 @@ function createOutput(captureTo) {
  * @param {object} seedData - результат devtools/seed.js (или его же снапшот после прогона)
  * @param {object} [opts]
  * @param {string[]} [opts.answers] - если задано, input.* работает в скриптованном режиме
+ * @param {boolean} [opts.autoConfirmPreview=true] - авто-отвечать на повторяющиеся вопросы
+ *   preview-движка ('all' на авто-группу, '' на ручную) вместо очереди `answers` — см. комментарий
+ *   у createScriptedInput про то, почему это не позиционные ответы.
  * @param {any[]} [opts.captureTo] - если задано, output.* дополнительно копит записи сюда (для --html)
  */
 function createMockSdk(seedData, opts = {}) {
   const space = new Space(seedData);
-  const input = opts.answers ? createScriptedInput(opts.answers) : createInteractiveInput();
+  const input = opts.answers
+    ? createScriptedInput(opts.answers, { autoConfirmPreview: opts.autoConfirmPreview })
+    : createInteractiveInput();
   const output = createOutput(opts.captureTo || null);
   return {
     space,

@@ -8,10 +8,20 @@
 // кэшируется только ID таблицы Config — сам конфиг живёт в самой MWS-таблице, доступной всем.
 // В mock-режиме localStorage эмулируется файлом data/derived/local-config-cache.json.
 
-const fs = require('node:fs');
-const path = require('node:path');
+// fs/path — только под Node (локальная разработка); в реальном MWS (браузер) их нет вообще, и
+// обращение к ним на верхнем уровне файла упало бы сразу при загрузке бандла, до того как дело
+// дойдёт до какой-либо логики. Поэтому получение зависимостей и их использование в readCache/
+// writeCache/clearCache ниже — целиком под одной и той же проверкой typeof require, а не только
+// в "шапке" файла, как в остальных lib-модулях (см. solution/src/lib/schema.js).
+const IS_NODE = typeof require === 'function';
+const CACHE_KEY = 'copilotConfigCacheV1'; // ключ в localStorage в браузере
+let cachePath = null;
+if (IS_NODE) {
+  // eslint-disable-next-line global-require
+  const path = require('node:path');
+  cachePath = path.join(__dirname, '..', '..', '..', 'data', 'derived', 'local-config-cache.json');
+}
 
-const CACHE_PATH = path.join(__dirname, '..', '..', '..', 'data', 'derived', 'local-config-cache.json');
 const CONFIG_PAYLOAD_FIELD = 'payload';
 
 const DEFAULT_THRESHOLDS = {
@@ -19,6 +29,7 @@ const DEFAULT_THRESHOLDS = {
   matchManualLow: 0.6,
   matchTopK: 3, // сколько вариантов показывать в неоднозначных случаях — US11
   classifyAuto: 0.6,
+  classifyManualLow: 0.3, // ниже — классификатор не предлагает вообще (слишком мало сигналов)
 };
 
 const TABLE_LABELS = {
@@ -32,28 +43,53 @@ const TABLE_LABELS = {
 
 function readCache() {
   try {
-    return JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+    if (IS_NODE) {
+      // eslint-disable-next-line global-require
+      return JSON.parse(require('node:fs').readFileSync(cachePath, 'utf8'));
+    }
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
   }
 }
 
 function writeCache(data) {
-  fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(data, null, 2));
+  if (IS_NODE) {
+    // eslint-disable-next-line global-require
+    const fs = require('node:fs');
+    // eslint-disable-next-line global-require
+    const path = require('node:path');
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify(data, null, 2));
+    return;
+  }
+  localStorage.setItem(CACHE_KEY, JSON.stringify(data));
 }
 
 function clearCache() {
-  try { fs.unlinkSync(CACHE_PATH); } catch (e) { /* нечего чистить */ }
+  try {
+    if (IS_NODE) {
+      // eslint-disable-next-line global-require
+      require('node:fs').unlinkSync(cachePath);
+    } else {
+      localStorage.removeItem(CACHE_KEY);
+    }
+  } catch (e) { /* нечего чистить */ }
 }
 
-let WIZARD_ROLES;
-try {
+// См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js. Раньше здесь было
+// `const { WIZARD_ROLES } = require(...)`, что после сборки в один файл конфликтовало бы с
+// собственным `const WIZARD_ROLES` внутри schema.js в общей области видимости — назвал локальную
+// переменную иначе (wizardRoles) специально, чтобы не плодить одноимённые объявления.
+let schemaLib;
+if (typeof require === 'function') {
   // eslint-disable-next-line global-require
-  WIZARD_ROLES = require('./schema').WIZARD_ROLES;
-} catch (e) {
-  WIZARD_ROLES = null; // после конкатенации в бандл schema.js уже выполнился раньше — см. Milestone 11
+  schemaLib = require('./schema');
+} else {
+  schemaLib = globalThis.CopilotLib.schema;
 }
+const wizardRoles = schemaLib.WIZARD_ROLES;
 
 /**
  * Одноразовый мастер настройки (US1 часть 1 + US2). Спрашивает ID каждой связанной таблицы и
@@ -72,7 +108,7 @@ async function runWizard(sdk) {
     const id = (await input.textAsync(`ID таблицы «${TABLE_LABELS[key]}»:`)).trim();
     const datasheet = await space.getDatasheetAsync(id);
     const fields = {};
-    for (const role of WIZARD_ROLES[key]) {
+    for (const role of wizardRoles[key]) {
       const field = await input.fieldAsync(`«${TABLE_LABELS[key]}»: какое поле соответствует роли «${role}»?`, datasheet);
       fields[role] = field.id;
     }
@@ -159,4 +195,9 @@ const configModule = {
   clearCache,
 };
 
-if (typeof module !== 'undefined') module.exports = configModule;
+if (typeof module !== 'undefined') {
+  module.exports = configModule;
+} else {
+  globalThis.CopilotLib = globalThis.CopilotLib || {};
+  globalThis.CopilotLib.config = configModule;
+}

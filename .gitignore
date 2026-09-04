@@ -37,3 +37,12 @@ data/derived/*
 # Generated per-run test reports: keep only its policy file
 solution/devtools/reports/*
 !solution/devtools/reports/README.md
+
+# Exceptions to the generic "dist/"/"build/" rule above: solution/build/build.js is our actual
+# source code (the bundler script, not build output), and solution/dist/widget.bundle.js is the
+# real deliverable — the single file pasted into MWS Tables' Script Widget editor (Milestone 11) —
+# we commit it deliberately so graders/reviewers don't need to run Node to get it.
+!solution/build/
+!solution/build/**
+!solution/dist/
+!solution/dist/widget.bundle.js

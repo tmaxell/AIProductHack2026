@@ -37,11 +37,11 @@ US1 просит не только «сопоставить поля» (одно
 | Таблица | Роли полей |
 |---|---|
 | Компании | `inn`, `email`, `phone`, `city`, `aliases`, `legalName`, `active` |
-| Сотрудники | `email`, `phone`, `role`, `skills`, `specializations`, `capacityHoursWeek`, `currentLoadPct`, `absentFrom`, `absentTo`, `active` |
+| Сотрудники | `fio`, `email`, `phone`, `role`, `skills`, `specializations`, `capacityHoursWeek`, `currentLoadPct`, `absentFrom`, `absentTo`, `active` |
 | Шаблоны задач | `projectType`, `taskCode`, `taskName`, `order`, `durationHours`, `requiredRole`, `requiredSkills`, `predecessorCode`, `defaultPriority`, `mandatory` |
 | Проекты | `projectName`, `projectType`, `priority`, `budget`, `currency`, `plannedStart`, `plannedEnd`, `status`, `companyLink` |
 | Задачи | `taskName`, `status`, `priority`, `projectLink`, `assigneeLink`, `estimatedHours`, `dueDate`, `requiredRole`, `requiredSkills`, `sourceKey`, `blockedByLink` |
-| Заявки (своя же таблица) | все `*_raw` роли + `company_link`, `project_link`, `duplicate_link`, `duplicate_group_id`, `suggested_project_type`, `suggested_priority`, `match_confidence`, `match_reason`, `anomaly_flags`, `anomaly_notes`, `readiness_status`, `_processed_hash`, `_last_run_id` |
+| Заявки (своя же таблица) | все `*_raw` роли + `company_link`, `employee_link`, `project_link`, `duplicate_link`, `duplicate_group_id`, `suggested_project_type`, `suggested_priority`, `match_confidence`, `match_reason`, `anomaly_flags`, `anomaly_notes`, `readiness_status`, `_processed_hash`, `_last_run_id` |
 
 ## Выход
 

@@ -5,8 +5,21 @@
 // формируют массивы `Action`, а этот модуль их показывает и применяет — своей логики
 // подтверждения у остальных модулей нет.
 
-const NORMALIZE_AUTO_THRESHOLD = 0.5;
-const NORMALIZE_SHOW_FLOOR = 0.2;
+// См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js.
+let utilLib;
+if (typeof require === 'function') {
+  // eslint-disable-next-line global-require
+  utilLib = require('./util');
+} else {
+  utilLib = globalThis.CopilotLib.util;
+}
+const { valuesEqual } = utilLib;
+
+// Дефолтный порог для всего, что не "link"/"classify" — сейчас это normalize (детерминированные
+// правила, свой порог 0.5 зашит в самих функциях normalize.js) и anomaly-ack (аномалии всегда
+// confidence:1, информационная запись — всегда попадает в авто-группу через этот же дефолт).
+const DEFAULT_AUTO_THRESHOLD = 0.5;
+const DEFAULT_SHOW_FLOOR = 0.2;
 const CLASSIFY_SHOW_FLOOR = 0.2;
 
 function fmt(v) {
@@ -15,23 +28,16 @@ function fmt(v) {
   return String(v);
 }
 
-function valuesEqual(a, b) {
-  if (a === b) return true;
-  if ((a === null || a === undefined || a === '') && (b === null || b === undefined || b === '')) return true;
-  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => v === b[i]);
-  return false;
-}
-
 function getAutoThreshold(action, config) {
   if (action.kind === 'link') return config.thresholds.matchAuto;
   if (action.kind === 'classify') return config.thresholds.classifyAuto;
-  return NORMALIZE_AUTO_THRESHOLD;
+  return DEFAULT_AUTO_THRESHOLD;
 }
 
 function getShowFloor(action, config) {
   if (action.kind === 'link') return config.thresholds.matchManualLow;
   if (action.kind === 'classify') return CLASSIFY_SHOW_FLOOR;
-  return NORMALIZE_SHOW_FLOOR;
+  return DEFAULT_SHOW_FLOOR;
 }
 
 /** Делит pending-действия на авто/ручные (сгруппированные по record+field) и отбрасывает то, что ниже "порога показа". */
@@ -284,4 +290,9 @@ const previewModule = {
   valuesEqual,
 };
 
-if (typeof module !== 'undefined') module.exports = previewModule;
+if (typeof module !== 'undefined') {
+  module.exports = previewModule;
+} else {
+  globalThis.CopilotLib = globalThis.CopilotLib || {};
+  globalThis.CopilotLib.preview = previewModule;
+}

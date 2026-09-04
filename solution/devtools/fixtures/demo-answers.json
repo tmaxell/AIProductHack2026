@@ -44,6 +44,7 @@
   "company_active",
 
   "dst_employees",
+  "employee_fio",
   "employee_email",
   "employee_phone",
   "employee_role",
@@ -93,9 +94,5 @@
 
   "dst_runs",
 
-  "Все записи",
-
-  "all",
-
-  ""
+  "Все записи"
 ]
