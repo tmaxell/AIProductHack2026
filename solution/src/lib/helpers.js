@@ -109,5 +109,5 @@ if (typeof module !== 'undefined') {
   module.exports = utilModule;
 } else {
   globalThis.CopilotLib = globalThis.CopilotLib || {};
-  globalThis.CopilotLib.util = utilModule;
+  globalThis.CopilotLib.helpers = utilModule;
 }

@@ -8,18 +8,26 @@
 // кэшируется только ID таблицы Config — сам конфиг живёт в самой MWS-таблице, доступной всем.
 // В mock-режиме localStorage эмулируется файлом data/derived/local-config-cache.json.
 
-// fs/path — только под Node (локальная разработка); в реальном MWS (браузер) их нет вообще, и
-// обращение к ним на верхнем уровне файла упало бы сразу при загрузке бандла, до того как дело
-// дойдёт до какой-либо логики. Поэтому получение зависимостей и их использование в readCache/
-// writeCache/clearCache ниже — целиком под одной и той же проверкой typeof require, а не только
-// в "шапке" файла, как в остальных lib-модулях (см. solution/src/lib/schema.js).
-const IS_NODE = typeof require === 'function';
+// fs/path — только под Node (локальная разработка); в реальном MWS (браузер) их нет вообще. Но
+// важно даже не это: сам текст обращения к встроенным Node-модулям fs/path где-либо в скрипте —
+// даже недостижимый за `if (IS_NODE)` — вешает реальный MWS Script Widget на ~минуту без единой
+// ошибки (эмпирически проверено, см. solution/docs/PLATFORM-NOTES.md); похоже на статическую
+// реакцию платформы на эти конкретные спецификаторы ещё до выполнения кода. Поэтому вся работа с
+// fs/path вынесена в solution/src/lib/node-cache.js, который build.js НИКОГДА не включает в
+// widget.bundle.js (не в LIB_ORDER) — обращение к node-cache.js ниже недостижимо в браузере/бандле
+// точно так же, как раньше был недостижим прямой доступ к fs, но сам этот текст безопасен: это
+// обычный относительный require на наш же модуль, как и в остальных lib-файлах.
+//
+// `&& !globalThis.__COPILOT_BUNDLED__` — потому что в реальном MWS Script Widget `require` тоже
+// может существовать как глобальная функция (для разрешённых npm-пакетов); без этой оговорки
+// голый `typeof require === 'function'` уходил бы по Node-ветке. Метку выставляет
+// solution/build/build.js в самом начале собранного файла.
+const IS_NODE = typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__;
 const CACHE_KEY = 'copilotConfigCacheV1'; // ключ в localStorage в браузере
-let cachePath = null;
+let nodeCache = null;
 if (IS_NODE) {
   // eslint-disable-next-line global-require
-  const path = require('node:path');
-  cachePath = path.join(__dirname, '..', '..', '..', 'data', 'derived', 'local-config-cache.json');
+  nodeCache = require('./node-cache');
 }
 
 const CONFIG_PAYLOAD_FIELD = 'payload';
@@ -44,8 +52,7 @@ const TABLE_LABELS = {
 function readCache() {
   try {
     if (IS_NODE) {
-      // eslint-disable-next-line global-require
-      return JSON.parse(require('node:fs').readFileSync(cachePath, 'utf8'));
+      return JSON.parse(nodeCache.readFileSync(nodeCache.cachePath));
     }
     const raw = localStorage.getItem(CACHE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -56,12 +63,7 @@ function readCache() {
 
 function writeCache(data) {
   if (IS_NODE) {
-    // eslint-disable-next-line global-require
-    const fs = require('node:fs');
-    // eslint-disable-next-line global-require
-    const path = require('node:path');
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify(data, null, 2));
+    nodeCache.writeFileSync(nodeCache.cachePath, JSON.stringify(data, null, 2));
     return;
   }
   localStorage.setItem(CACHE_KEY, JSON.stringify(data));
@@ -70,8 +72,7 @@ function writeCache(data) {
 function clearCache() {
   try {
     if (IS_NODE) {
-      // eslint-disable-next-line global-require
-      require('node:fs').unlinkSync(cachePath);
+      nodeCache.unlinkSync(nodeCache.cachePath);
     } else {
       localStorage.removeItem(CACHE_KEY);
     }
@@ -79,11 +80,11 @@ function clearCache() {
 }
 
 // См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js. Раньше здесь было
-// `const { WIZARD_ROLES } = require(...)`, что после сборки в один файл конфликтовало бы с
+// импорт WIZARD_ROLES напрямую, что после сборки в один файл конфликтовало бы с
 // собственным `const WIZARD_ROLES` внутри schema.js в общей области видимости — назвал локальную
 // переменную иначе (wizardRoles) специально, чтобы не плодить одноимённые объявления.
 let schemaLib;
-if (typeof require === 'function') {
+if (typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__) {
   // eslint-disable-next-line global-require
   schemaLib = require('./schema');
 } else {
@@ -94,14 +95,14 @@ const wizardRoles = schemaLib.WIZARD_ROLES;
 /**
  * Одноразовый мастер настройки (US1 часть 1 + US2). Спрашивает ID каждой связанной таблицы и
  * маппинг логических ролей полей на реальные Field через input.fieldAsync — без единого
- * хардкода ID. Результат сохраняется в записи датасета "⚙️ Copilot Config".
+ * хардкода ID. Результат сохраняется в записи датасета "Copilot Config".
  */
 async function runWizard(sdk) {
   const { space, input, output } = sdk;
   output.markdown('## Мастер настройки Project Launch Copilot');
   output.text('Отвечайте ID таблиц так, как они называются в вашем пространстве MWS Tables.');
 
-  const configDatasheetId = (await input.textAsync('ID таблицы «⚙️ Copilot Config»:')).trim();
+  const configDatasheetId = (await input.textAsync('ID таблицы «Copilot Config»:')).trim();
   const tables = {};
 
   for (const key of Object.keys(TABLE_LABELS)) {

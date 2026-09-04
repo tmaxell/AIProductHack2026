@@ -5,11 +5,11 @@
 
 // См. пояснение про CopilotLib-неймспейс в solution/src/lib/schema.js.
 let utilLib;
-if (typeof require === 'function') {
+if (typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__) {
   // eslint-disable-next-line global-require
-  utilLib = require('./util');
+  utilLib = require('./helpers');
 } else {
-  utilLib = globalThis.CopilotLib.util;
+  utilLib = globalThis.CopilotLib.helpers;
 }
 const { stringSimilarity, tokenize } = utilLib;
 

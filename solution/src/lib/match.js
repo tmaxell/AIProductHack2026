@@ -9,14 +9,14 @@
 // файлу и не конфликтует с одноимёнными объявлениями в normalize.js/util.js/других модулях.
 let normalizeLib;
 let utilLib;
-if (typeof require === 'function') {
+if (typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__) {
   // eslint-disable-next-line global-require
   normalizeLib = require('./normalize');
   // eslint-disable-next-line global-require
-  utilLib = require('./util');
+  utilLib = require('./helpers');
 } else {
   normalizeLib = globalThis.CopilotLib.normalize;
-  utilLib = globalThis.CopilotLib.util;
+  utilLib = globalThis.CopilotLib.helpers;
 }
 const { normalizeEmail, normalizeCompanyName, normalizeYoAndCase } = normalizeLib;
 const { stringSimilarity, addToBucket, UnionFind } = utilLib;

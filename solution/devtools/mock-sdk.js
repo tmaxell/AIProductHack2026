@@ -154,6 +154,13 @@ class Space {
     if (!ds) throw new Error(`Таблица с ID "${id}" не найдена. Известные ID: ${[...this._byId.keys()].join(', ')}`);
     return ds;
   }
+
+  // Эмпирически на реальном MWS обнаружено: input.textAsync не реагирует на ввод, если перед ним
+  // ни разу не было вызвано ни одного space.*Async — см. "прогрев" в main.js и PLATFORM-NOTES.md.
+  // Мок возвращает первый попавшийся датасет (конкретное значение не важно, важен сам факт await).
+  async getActiveDatasheetAsync() {
+    return [...this._byId.values()][0] || null;
+  }
 }
 
 // Вопросы preview-движка (Milestone 4) повторяются по разу на каждую фазу (нормализация/

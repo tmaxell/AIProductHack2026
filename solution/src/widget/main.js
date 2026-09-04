@@ -16,7 +16,7 @@ let previewLib;
 let matchLib;
 let classifyLib;
 let anomaliesLib;
-if (typeof require === 'function') {
+if (typeof require === 'function' && !globalThis.__COPILOT_BUNDLED__) {
   // eslint-disable-next-line global-require
   configLib = require('../lib/config');
   // eslint-disable-next-line global-require
@@ -61,6 +61,14 @@ function mergeApplied(applications, appliedActions) {
 async function run(sdk) {
   const { space, output } = sdk;
   output.markdown('# Project Launch Copilot — локальный прогон');
+
+  // "Прогрев" — эмпирически обнаружено на реальном MWS: input.textAsync (первый вызов — в мастере
+  // настройки внутри loadOrCreateConfig ниже) не реагирует на ввод пользователя, если до него ни
+  // разу не было вызвано ни одного space.*Async. Само возвращаемое значение не используется —
+  // важен только факт await. См. solution/docs/PLATFORM-NOTES.md.
+  if (typeof space.getActiveDatasheetAsync === 'function') {
+    await space.getActiveDatasheetAsync().catch(() => null);
+  }
 
   const config = await configLib.loadOrCreateConfig(sdk);
   const scope = await configLib.selectScope(sdk, config);

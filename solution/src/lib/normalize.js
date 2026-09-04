@@ -15,7 +15,11 @@ function isEmpty(raw) {
 /** Убирает лишние пробелы (включая неразрывный/zero-width) и схлопывает их. */
 function normalizeWhitespace(raw) {
   if (isEmpty(raw)) return result(null, false, 0, 'empty');
-  const value = String(raw).replace(/[ ​]/g, ' ').replace(/\s+/g, ' ').trim();
+  // \u00A0 (неразрывный пробел) и \u200B (zero-width space) ниже — экранированы явно кодами,
+  // а не вставлены сырыми невидимыми байтами: сырые невидимые символы внутри исходника ломали
+  // редактор кода MWS Script Widget при вставке всего бандла целиком (выглядело как "скрипт
+  // зависает намертво ещё до старта выполнения" — баг платформы-редактора, не логики).
+  const value = String(raw).replace(/[\u00A0\u200B]/g, ' ').replace(/\s+/g, ' ').trim();
   return result(value, value !== raw, value ? 0.9 : 0, 'убраны лишние пробелы/служебные символы');
 }
 
