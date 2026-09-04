@@ -33,3 +33,7 @@ temp/
 # Generated data: keep only its policy file
 data/derived/*
 !data/derived/README.md
+
+# Generated per-run test reports: keep only its policy file
+solution/devtools/reports/*
+!solution/devtools/reports/README.md
