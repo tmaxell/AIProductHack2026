@@ -293,7 +293,7 @@
     <header class="m-head">
       <div>
         <h2 class="m-title" id="aiTitle">AI-объяснение</h2>
-        <p class="settings-hint">Groq объясняет изменения, но не может их применить или опубликовать.</p>
+        <p class="settings-hint">Нажатие «AI-объяснение» запускает Groq. Модель не может применить или опубликовать изменения.</p>
       </div>
       <button class="icon-btn" onclick="closeAiExplanation()" aria-label="Закрыть AI-объяснение">
         <svg class="ic"><use href="#i-close"/></svg>
@@ -302,8 +302,7 @@
     <div class="m-body" id="aiBody"></div>
     <footer class="m-foot">
       <span class="spacer"></span>
-      <button class="btn-ghost" onclick="closeAiExplanation()">Закрыть</button>
-      <button class="btn-primary" id="aiSendBtn" onclick="requestAiExplanation()" disabled>Отправить в Groq</button>
+      <button class="btn-primary" onclick="closeAiExplanation()">Закрыть</button>
     </footer>
   </div>
 </div>

@@ -49,8 +49,8 @@ npm run build      # компиляция в dist/
 | `POST` | `/api/v1/change-sets/:id/publish` | опубликовать accepted-действия |
 | `POST` | `/api/v1/change-sets/:id/rollback` | создать компенсирующий rollback-draft |
 | `POST` | `/api/v1/change-sets/:id/discard` | отбросить draft без удаления истории |
-| `POST` | `/api/v1/change-sets/:id/explanation-preview` | показать точный маскированный payload без внешнего вызова |
-| `POST` | `/api/v1/change-sets/:id/explanations` | после явного согласия получить и сохранить объяснение Groq |
+| `POST` | `/api/v1/change-sets/:id/explanation-preview` | служебно получить точный маскированный payload без внешнего вызова |
+| `POST` | `/api/v1/change-sets/:id/explanations` | по явному нажатию «AI-объяснение» получить и сохранить результат Groq |
 | `GET` | `/api/v1/change-sets/:id/explanations` | история результатов и ошибок объяснения |
 | `POST` | `/api/v1/change-sets/apply` | deprecated stateless selective apply для совместимости |
 | `GET` | `/api/v1/docs` | Swagger UI, только при `APP_EXPOSE_DOCS=true` |
@@ -74,8 +74,8 @@ named volume `change-set-storage`; `docker compose down -v` удаляет ис�
 
 Groq получает только выбранные действия сохранённой версии. Полные исходные
 строки не отправляются, record/action id заменяются псевдонимами, email,
-телефоны и ФИО маскируются. UI сначала вызывает локальный preview и показывает
-поля и значения, затем требует отдельное подтверждение внешней отправки.
+телефоны и ФИО маскируются. Нажатие «AI-объяснение» сразу запускает внешний
+вызов; фактически переданные поля и значения UI показывает рядом с результатом.
 
 Провайдер не получает tools и не может менять решения, публиковать или делать
 rollback. Ответ валидируется по закрытой JSON Schema и сохраняется с моделью и
