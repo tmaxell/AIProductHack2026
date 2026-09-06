@@ -510,6 +510,50 @@ function launchReportLink() {
   return '<p style="margin-top:10px"><a href="#" onclick="event.preventDefault(); openLaunchReport();">Итоговый отчёт запуска →</a></p>';
 }
 
+/* Спорные значения детерминированно не чинятся. Разбор — отдельное явное
+   действие: только по нему данные уходят во внешний сервис. Ответ модели
+   становится обычным предложением и применяется при публикации. */
+function ambiguousCount() {
+  if (!activeChangeSet) return 0;
+  return activeChangeSet.issues.filter(issue => issue.code === 'UNRECOGNIZED_CITY').length;
+}
+
+function ambiguousBanner() {
+  const count = ambiguousCount();
+  if (!count) return '';
+  const already = activeChangeSet.actions.some(action => action.kind === 'ai');
+  return '<div class="ambiguous-box"><b>Спорных значений: ' + count + '</b>' +
+    '<p>Опечатки и сокращения, которые правила не восстанавливают.</p>' +
+    (already
+      ? '<p class="settings-hint">Разбор выполнен, предложения добавлены в список изменений.</p>'
+      : '<button class="btn-ghost block" onclick="resolveAmbiguous()">Разобрать с помощью AI</button>') +
+    '</div>';
+}
+
+async function resolveAmbiguous() {
+  if (!activeChangeSet) return;
+  try {
+    const outcome = await window.API.createAiSuggestions(activeChangeSet.id);
+    // Решения пользователя ещё не сохранены на backend, поэтому пересборка
+    // обнулила бы их. Сохраняем прежний выбор и добавляем новые предложения
+    // подтверждёнными — как и все остальные; применятся при публикации.
+    const previous = new Set(acceptedChanges);
+    reportFromChangeSet(outcome.changeSet, false);
+    outcome.changeSet.actions
+      .filter(action => action.kind === 'ai' && action.decision === 'pending')
+      .forEach(action => previous.add(action.id));
+    acceptedChanges = previous;
+    renderWidget();
+    showToast(outcome.added
+      ? 'Добавлено предложений: ' + outcome.added + '. Применятся при публикации.'
+      : 'Модель не нашла уверенных соответствий');
+  } catch (error) {
+    showToast(error.status === 503
+      ? 'AI-разбор недоступен: на backend нет ключа Groq'
+      : error.message);
+  }
+}
+
 function relationOverview(summary) {
   return '<div class="block-label relation-title">Связи</div><div class="relation-map">' +
     '<div><span class="relation-box source">Заявки</span><span class="relation-arrow">→</span>' +
@@ -672,7 +716,7 @@ function renderWidget() {
     (s.companiesManualReview ? statusRow('Компания — нужен ручной выбор', s.companiesManualReview, 'amber') : '') +
     (s.typesManualReview ? statusRow('Тип проекта — нужен ручной выбор', s.typesManualReview, 'amber') : '') +
     (s.duplicateClusters ? statusRow('Найдено дублей', s.duplicateClusters + ' групп / ' + s.duplicateMembers + ' заявок', 'amber') : '') +
-    relationOverview(s) + disabledFieldsBanner() + launchReportLink();
+    relationOverview(s) + ambiguousBanner() + disabledFieldsBanner() + launchReportLink();
 
   if (s.changes) {
     setActions(

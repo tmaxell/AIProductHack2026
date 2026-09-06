@@ -43,7 +43,10 @@ export const Confidence = Type.Union(
 export const ChangeAction = Type.Object(
   {
     id: Type.String({ description: 'Детерминированный id: <recordId>::<ruleCode>' }),
-    kind: Type.Union([Type.Literal('normalize'), Type.Literal('match'), Type.Literal('duplicate')]),
+    kind: Type.Union([
+      Type.Literal('normalize'), Type.Literal('match'),
+      Type.Literal('duplicate'), Type.Literal('ai'),
+    ]),
     recordId: Type.String(),
     field: Type.String(),
     ruleCode: Type.String(),

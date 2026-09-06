@@ -90,4 +90,42 @@ export const CHANGE_SET_MIGRATIONS: readonly Migration[] = [
         ON change_set_explanations(change_set_id, created_at DESC);
     `,
   },
+  {
+    version: 3,
+    // Разбор спорных значений добавляет действия вида 'ai'. SQLite не умеет
+    // менять CHECK на месте, поэтому таблица пересоздаётся с переносом данных.
+    // Определение повторяет исходное целиком: иначе миграция молча ослабила бы
+    // остальные ограничения и значения по умолчанию.
+    sql: `
+      CREATE TABLE change_set_actions_v3 (
+        change_set_id TEXT NOT NULL REFERENCES change_sets(id) ON DELETE RESTRICT,
+        action_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('normalize', 'match', 'duplicate', 'ai')),
+        record_id TEXT NOT NULL,
+        field TEXT NOT NULL,
+        rule_code TEXT NOT NULL,
+        rule_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        action_group TEXT NOT NULL,
+        before_value TEXT,
+        after_value TEXT,
+        confidence TEXT CHECK (confidence IS NULL OR confidence IN ('high', 'medium', 'low')),
+        evidence_json TEXT,
+        decision TEXT NOT NULL DEFAULT 'pending'
+          CHECK (decision IN ('pending', 'accepted', 'rejected')),
+        edited_after TEXT,
+        edited_after_set INTEGER NOT NULL DEFAULT 0 CHECK (edited_after_set IN (0, 1)),
+        result TEXT NOT NULL DEFAULT 'pending'
+          CHECK (result IN ('pending', 'applied', 'skipped', 'conflict', 'failed')),
+        result_message TEXT,
+        executed_at TEXT,
+        PRIMARY KEY (change_set_id, action_id)
+      );
+
+      INSERT INTO change_set_actions_v3 SELECT * FROM change_set_actions;
+      DROP TABLE change_set_actions;
+      ALTER TABLE change_set_actions_v3 RENAME TO change_set_actions;
+    `,
+  },
 ];

@@ -44,7 +44,7 @@ function toRecordDtos(records: readonly SourceRecord[]): RecordDto[] {
 }
 
 interface ActionDto {
-  kind: 'normalize' | 'match' | 'duplicate';
+  kind: 'normalize' | 'match' | 'duplicate' | 'ai';
   id: string;
   recordId: string;
   field: string;
@@ -86,7 +86,7 @@ function toVersionedActionDto(action: VersionedAction) {
   };
 }
 
-function toStoredDto(changeSet: VersionedChangeSet) {
+export function toStoredDto(changeSet: VersionedChangeSet) {
   return {
     id: changeSet.id,
     sequence: changeSet.sequence,

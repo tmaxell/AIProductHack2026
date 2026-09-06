@@ -24,6 +24,7 @@ import { API_PREFIX, ErrorResponse } from './contracts/common.js';
 import { CHANGE_SET_SCHEMAS } from './contracts/change-set.js';
 import { EXPLANATION_SCHEMAS } from './contracts/explanation.js';
 import { EmptyExplanationScopeError } from './application/change-set-explanation-service.js';
+import { ChangeSetAiSuggestionService } from './application/ai-suggestion-service.js';
 import { GroqExplanationProvider } from './infrastructure/groq-explanation-provider.js';
 import { v1Routes } from './routes/v1/index.js';
 
@@ -34,6 +35,7 @@ declare module 'fastify' {
     dataset: Dataset;
     changeSets: ChangeSetService;
     explanations: ChangeSetExplanationService;
+    aiSuggestions: ChangeSetAiSuggestionService;
   }
 }
 
@@ -76,13 +78,9 @@ export async function buildApp(
         maxRetries: config.groqMaxRetries,
         maxCompletionTokens: config.groqMaxCompletionTokens,
       });
-  app.decorate(
-    'explanations',
-    new ChangeSetExplanationService(
-      changeSetStore,
-      options.explanationProvider ?? configuredExplanationProvider,
-    ),
-  );
+  const explanationProvider = options.explanationProvider ?? configuredExplanationProvider;
+  app.decorate('explanations', new ChangeSetExplanationService(changeSetStore, explanationProvider));
+  app.decorate('aiSuggestions', new ChangeSetAiSuggestionService(changeSetStore, explanationProvider));
   app.addHook('onClose', () => {
     changeSetStore.close();
     return Promise.resolve();

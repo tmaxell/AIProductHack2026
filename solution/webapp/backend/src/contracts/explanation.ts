@@ -1,5 +1,5 @@
 import { Type } from '@sinclair/typebox';
-import { ActionDecision, ActionResult, ChangeSetStatus, Confidence } from './change-set.js';
+import { ActionDecision, ActionResult, ChangeSetStatus, Confidence, StoredChangeSet } from './change-set.js';
 
 export const ExplanationScope = Type.Union(
   [Type.Literal('accepted'), Type.Literal('not-rejected')],
@@ -26,7 +26,10 @@ export const ExplanationRequest = Type.Object(
 export const DisclosedAction = Type.Object({
   actionRef: Type.String(),
   recordRef: Type.String(),
-  kind: Type.Union([Type.Literal('normalize'), Type.Literal('match'), Type.Literal('duplicate')]),
+  kind: Type.Union([
+    Type.Literal('normalize'), Type.Literal('match'),
+    Type.Literal('duplicate'), Type.Literal('ai'),
+  ]),
   field: Type.String(),
   ruleCode: Type.String(),
   ruleName: Type.String(),
@@ -97,7 +100,24 @@ export const ExplanationList = Type.Object(
   { $id: 'ExplanationList' },
 );
 
+export const AiSuggestionSummary = Type.Object(
+  {
+    requested: Type.Integer({ description: 'Сколько спорных значений было отправлено' }),
+    added: Type.Integer({ description: 'Сколько предложений добавлено в draft' }),
+    rejected: Type.Integer({ description: 'Сколько ответов отброшено локальной проверкой' }),
+    changeSet: StoredChangeSet,
+  },
+  { $id: 'AiSuggestionSummary' },
+);
+
+export const AiSuggestionStatus = Type.Object(
+  { available: Type.Boolean(), pending: Type.Integer() },
+  { $id: 'AiSuggestionStatus' },
+);
+
 export const EXPLANATION_SCHEMAS = [
+  AiSuggestionSummary,
+  AiSuggestionStatus,
   ExplanationScope,
   ExplanationRequest,
   ExplanationPreviewResponse,

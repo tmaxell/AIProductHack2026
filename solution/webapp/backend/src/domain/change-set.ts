@@ -25,7 +25,7 @@ export interface SourceRecord {
 }
 
 /** Нормализация чинит формат значения, сопоставление связывает со справочником. */
-export type ActionKind = 'normalize' | 'match' | 'duplicate';
+export type ActionKind = 'normalize' | 'match' | 'duplicate' | 'ai';
 
 /** Одно предлагаемое изменение одного поля одной записи. */
 export interface ChangeAction {
@@ -312,14 +312,17 @@ export function buildChangeSet(
       if (found) issues.push(found);
     }
     if (supersededNames.size > 0) {
-      for (let i = actions.length - 1; i >= 0; i -= 1) {
-        const candidate = actions[i]!;
-        if (candidate.kind === 'normalize' && candidate.field === 'company_name' &&
-            supersededNames.has(candidate.recordId)) {
-          actions.splice(i, 1);
-          normalizations -= 1;
-        }
-      }
+      // Один проход фильтром: splice в цикле по десяткам тысяч действий
+      // давал квадратичную сложность и заваливал разбор всей выгрузки.
+      const kept = actions.filter((candidate) => {
+        const superseded = candidate.kind === 'normalize' &&
+          candidate.field === 'company_name' &&
+          supersededNames.has(candidate.recordId);
+        if (superseded) normalizations -= 1;
+        return !superseded;
+      });
+      actions.length = 0;
+      actions.push(...kept);
     }
   }
 

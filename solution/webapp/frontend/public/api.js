@@ -106,6 +106,15 @@ window.API = {
       timeoutMs: 60000
     }),
 
+  getAiSuggestionStatus: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/ai-suggestions'),
+
+  /** Явное действие: только здесь спорные значения уходят во внешний сервис. */
+  createAiSuggestions: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/ai-suggestions', {
+      method: 'POST', body: {}, timeoutMs: 60000
+    }),
+
   listExplanations: (id) =>
     request('/change-sets/' + encodeURIComponent(id) + '/explanations'),
 

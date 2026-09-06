@@ -8,7 +8,10 @@ import {
   ExplanationPreviewResponse,
   ExplanationRequest,
   StoredExplanation,
+  AiSuggestionStatus,
+  AiSuggestionSummary,
 } from '../../contracts/explanation.js';
+import { toStoredDto } from './change-sets.js';
 import type { ExplanationPreview } from '../../domain/explanation.js';
 import type { StoredExplanation as StoredExplanationEntity } from '../../infrastructure/change-set-store.js';
 
@@ -81,6 +84,54 @@ function explanationDto(
 }
 
 export const explanationRoutes: FastifyPluginAsyncTypebox = (fastify) => {
+  fastify.get(
+    '/change-sets/:id/ai-suggestions',
+    {
+      schema: {
+        tags: ['ai'],
+        summary: 'Сколько спорных значений версии ждёт разбора',
+        description: 'Наружу ничего не отправляет: считает по сохранённым замечаниям.',
+        params: ChangeSetIdParams,
+        response: { 200: AiSuggestionStatus, 404: ErrorResponse },
+      },
+    },
+    (request) => ({
+      available: fastify.explanations.available,
+      pending: fastify.aiSuggestions.pending(request.params.id),
+    }),
+  );
+
+  fastify.post(
+    '/change-sets/:id/ai-suggestions',
+    {
+      schema: {
+        tags: ['ai'],
+        summary: 'Разобрать спорные значения и добавить их как предложения',
+        description:
+          'Явное действие пользователя: только здесь спорные значения уходят в Groq. ' +
+          'Ответ модели не применяется к данным, а становится обычным предложением ' +
+          'со статусом pending — оно попадёт в записи только при публикации версии. ' +
+          'Значения вне разрешённого словаря отбрасываются локальной проверкой.',
+        params: ChangeSetIdParams,
+        response: {
+          200: AiSuggestionSummary,
+          404: ErrorResponse,
+          409: ErrorResponse,
+          503: ErrorResponse,
+        },
+      },
+    },
+    async (request) => {
+      const outcome = await fastify.aiSuggestions.suggest(request.params.id);
+      return {
+        requested: outcome.requested,
+        added: outcome.added,
+        rejected: outcome.rejected,
+        changeSet: toStoredDto(outcome.changeSet),
+      };
+    },
+  );
+
   fastify.post(
     '/change-sets/:id/explanation-preview',
     {

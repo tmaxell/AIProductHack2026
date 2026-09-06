@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import type { ChangeSet, SourceRecord } from '../domain/change-set.js';
+import type { ChangeAction, ChangeSet, SourceRecord } from '../domain/change-set.js';
 import type {
   ExplanationOutput,
   ExplanationPayload,
@@ -197,6 +197,64 @@ export class SqliteChangeSetStore {
         parentId: options.parentId ?? null,
         rollbackOfId: options.rollbackOfId ?? null,
       });
+    });
+
+    return this.require(id);
+  }
+
+  /**
+   * Дописывает действия в draft. Нужно для разбора спорных значений: ответ
+   * модели становится обычным предложением и применяется только при
+   * публикации, наравне с детерминированными.
+   */
+  appendActions(id: string, actions: readonly ChangeAction[]): VersionedChangeSet {
+    const current = this.require(id);
+    if (current.status !== 'draft') {
+      throw new InvalidChangeSetStateError(
+        `Действия можно дописывать только в draft, текущий статус — ${current.status}`,
+      );
+    }
+    if (actions.length === 0) return current;
+
+    const known = new Set(current.actions.map((action) => action.id));
+    const fresh = actions.filter((action) => !known.has(action.id));
+    if (fresh.length === 0) return current;
+
+    this.transaction(() => {
+      const insertAction = this.db.prepare(
+        `INSERT INTO change_set_actions(
+           change_set_id, action_id, position, kind, record_id, field, rule_code, rule_name,
+           reason, action_group, before_value, after_value, confidence, evidence_json,
+           decision, edited_after, edited_after_set, result, result_message, executed_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 0, 'pending', NULL, NULL)`,
+      );
+      fresh.forEach((action, offset) => {
+        insertAction.run(
+          id,
+          action.id,
+          current.actions.length + offset,
+          action.kind,
+          action.recordId,
+          action.field,
+          action.ruleCode,
+          action.ruleName,
+          action.reason,
+          action.group,
+          action.before,
+          action.after,
+          action.confidence ?? null,
+          action.evidence === undefined ? null : JSON.stringify(action.evidence),
+        );
+      });
+
+      const summary = {
+        ...current.summary,
+        actions: current.summary.actions + fresh.length,
+      };
+      this.db
+        .prepare('UPDATE change_sets SET summary_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(summary), new Date().toISOString(), id);
+      this.insertEvent(id, 'ai.suggestions.added', { actions: fresh.length });
     });
 
     return this.require(id);

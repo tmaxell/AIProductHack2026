@@ -395,6 +395,9 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .copilot-details ul { padding-left: 18px; }
 .copilot-result-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .copilot-followups, .copilot-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ambiguous-box { margin-top: 12px; padding: 11px 12px; border: 1px solid var(--amber-border); border-radius: var(--r-card); background: var(--amber-light); }
+.ambiguous-box p { margin: 5px 0 9px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+.ambiguous-box .settings-hint { margin-bottom: 0; }
 .copilot-scope { margin-top: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 .copilot-followups button, .copilot-suggestions button { border: 1px solid #D9D0FA; border-radius: 999px; background: #F7F4FF; color: var(--purple-text); padding: 5px 9px; font: inherit; font-size: 11px; cursor: pointer; }
 .copilot-suggestions { padding: 0 14px 10px; margin-top: 0; }

@@ -85,7 +85,7 @@ describe('AI-объяснения сохранённого Change Set', () => {
 
   test('сохраняет успешный результат, модель, prompt version и audit-события', async () => {
     const explain = vi.fn<ExplanationProvider['explain']>().mockResolvedValue(result);
-    const app = await makeApp({ model: 'test-model', explain });
+    const app = await makeApp({ model: 'test-model', explain, suggest: () => Promise.resolve([]) });
     apps.push(app);
     const draft = await createDraft(app);
     const actionIds = draft.actions.map((action) => action.id);
@@ -147,6 +147,7 @@ describe('AI-объяснения сохранённого Change Set', () => {
   test('ошибка сохраняется, но не меняет статус Change Set', async () => {
     const provider: ExplanationProvider = {
       model: 'test-model',
+      suggest: () => Promise.resolve([]),
       explain: () => Promise.reject(new ExplanationProviderError('Временная ошибка', 'temporary')),
     };
     const app = await makeApp(provider);
@@ -174,7 +175,10 @@ describe('AI-объяснения сохранённого Change Set', () => {
     const directory = await mkdtemp(join(tmpdir(), 'plc-explanations-'));
     directories.push(directory);
     const storagePath = join(directory, 'store.sqlite');
-    const first = await makeApp({ model: 'test-model', explain: () => Promise.resolve(result) }, storagePath);
+    const first = await makeApp(
+      { model: 'test-model', explain: () => Promise.resolve(result), suggest: () => Promise.resolve([]) },
+      storagePath,
+    );
     const draft = await createDraft(first);
     await first.inject({
       method: 'POST',
