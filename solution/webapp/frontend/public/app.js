@@ -17,6 +17,15 @@ let reportRules = [];        // правила текущего отчёта
 let reportRuleIndex = 0;
 let acceptedChanges = new Set(); // подтверждённые пользователем предложения
 let lastRunSummary = null;   // {ok, total, duplicateClusters, duplicateMembers} из последнего прогона
+let activeChangeSet = null;  // сохранённая backend-версия — источник истины для publish
+let datasetSnapshot = null;  // метаданные полной выгрузки; строки остаются на backend
+let fullDatasetMode = false; // draft создан по всему snapshot, а не по выбранным строкам UI
+let copilotContext = null;   // версия, о которой идёт разговор в панели AI
+
+/* Сколько записей выгрузки разбирается за один прогон. Полная выгрузка даёт
+   десятки тысяч действий: их решения не помещаются в тело запроса, а интерфейс
+   не может их осмысленно показать. Берём первые N и пишем это явно. */
+const DATASET_BATCH = 100;
 
 // Снимок фактически применённых изменений: нужен, чтобы состояние
 // «применено» показывало реальные числа, а не результат повторной проверки.
@@ -55,6 +64,72 @@ function showToast(text) {
   }, 3200);
 }
 
+function toApiRecords(rows) {
+  return rows.map(row => {
+    const values = {};
+    FIELD_META.forEach(field => {
+      if (visibleColumns[field.key] !== false) values[field.key] = row[field.key] == null ? null : String(row[field.key]);
+    });
+    values.company_ref_id = row.company_ref_id || row.company_link || null;
+    values.duplicate_of = row.duplicate_of || row.duplicate_link || null;
+    return { id: row.row_id, values };
+  });
+}
+
+function applyApiRecords(apiRecords) {
+  apiRecords.forEach(apiRecord => {
+    const row = records.find(candidate => candidate.row_id === apiRecord.id);
+    if (!row) return;
+    Object.entries(apiRecord.values).forEach(([field, value]) => {
+      if (field === 'company_ref_id') row.company_link = value;
+      else if (field === 'duplicate_of') row.duplicate_link = value;
+      else row[field] = value;
+    });
+  });
+}
+
+function reportFromChangeSet(changeSet, acceptPending) {
+  activeChangeSet = changeSet;
+  const grouped = new Map();
+  changeSet.actions.forEach(action => {
+    const key = action.ruleCode;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        meta: { key, field: action.field, name: action.ruleName, reason: action.reason, group: action.group },
+        items: []
+      });
+    }
+    const row = records.find(candidate => candidate.row_id === action.recordId);
+    grouped.get(key).items.push({
+      id: action.id,
+      row_id: action.recordId,
+      application_id: row ? row.application_id : action.recordId,
+      field: action.field,
+      from: action.before,
+      to: action.editedAfter !== undefined ? action.editedAfter : action.after,
+      confidence: action.confidence,
+      evidence: action.evidence || [],
+      result: action.result
+    });
+  });
+  reportRules = Array.from(grouped.values()).flatMap(rule => {
+    const pageSize = 50;
+    const pages = Math.max(1, Math.ceil(rule.items.length / pageSize));
+    return Array.from({ length: pages }, (_, index) => ({
+      meta: rule.meta,
+      items: rule.items.slice(index * pageSize, (index + 1) * pageSize),
+      chunkIndex: index + 1,
+      chunkTotal: pages,
+      ruleTotal: rule.items.length,
+    }));
+  });
+  acceptedChanges = new Set(
+    changeSet.actions
+      .filter(action => action.decision === 'accepted' || (acceptPending && action.decision === 'pending'))
+      .map(action => action.id)
+  );
+}
+
 /* ---------- область запуска (шаг 1 сценария: "выбрать исходные записи") ---------- */
 // Чекбоксы в гриде — тот же selectedRows, что и раньше (только подсвечивали строку), но
 // теперь они реально задают, что попадёт в прогон. Пустой выбор = вся таблица. Соответствует
@@ -75,23 +150,25 @@ function getScope() {
 // widget-script.js#buildShadowApplication реально подменяет отключённое поле на null ещё до
 // того, как оно попадёт в engine.js — для движка оно как будто отсутствует, а не просто скрыто.
 const FIELD_META = [
+  { key: 'application_id',  label: 'Номер заявки',     column: true },
   { key: 'project_name',   label: 'Название проекта', column: true },
+  { key: 'project_description', label: 'Описание проекта', column: true },
   { key: 'company_name',   label: 'Компания',         column: true },
+  { key: 'company_inn',     label: 'ИНН компании',     column: true },
+  { key: 'company_email',   label: 'Email компании',   column: true },
+  { key: 'company_phone',   label: 'Телефон компании', column: true },
   { key: 'company_city',   label: 'Город',            column: true },
+  { key: 'requester_fio',   label: 'ФИО заявителя',    column: true },
+  { key: 'requester_email', label: 'Email заявителя',  column: true },
+  { key: 'requester_phone', label: 'Телефон заявителя', column: true },
+  { key: 'project_type',    label: 'Тип проекта',      column: true },
+  { key: 'priority',        label: 'Приоритет',        column: true },
   { key: 'budget',         label: 'Бюджет',           column: true },
-  { key: 'currency',       label: 'Валюта',           column: false },
+  { key: 'currency',       label: 'Валюта',           column: true },
   { key: 'planned_start',  label: 'Дата начала',      column: true },
   { key: 'planned_end',    label: 'Дата окончания',   column: true },
   { key: 'status',         label: 'Статус',           column: true },
-  { key: 'company_email',   label: 'Email компании',   column: false },
-  { key: 'requester_email', label: 'Email заявителя',  column: false },
-  { key: 'company_phone',   label: 'Телефон компании', column: false },
-  { key: 'requester_phone', label: 'Телефон заявителя', column: false },
-  { key: 'company_inn',     label: 'ИНН компании',     column: false },
-  { key: 'requester_fio',   label: 'ФИО заявителя',    column: false },
-  { key: 'priority',        label: 'Приоритет',        column: false },
-  { key: 'project_type',    label: 'Тип проекта',      column: false },
-  { key: 'application_id',  label: 'Номер заявки',     column: false },
+  { key: 'comment',         label: 'Комментарий',       column: true },
 ];
 const visibleColumns = {};
 FIELD_META.forEach(c => { visibleColumns[c.key] = true; });
@@ -180,6 +257,12 @@ function visibleRecords() {
     .some(v => String(v || '').toLowerCase().includes(s)));
 }
 
+function renderRelationChip(value, label) {
+  if (!value) return '<span class="relation-empty">Не связана</span>';
+  return '<span class="relation-chip" title="' + escapeHtml(label + ': ' + value) + '">' +
+    '<span class="relation-node" aria-hidden="true"></span>' + escapeHtml(value) + '</span>';
+}
+
 function renderTable() {
   const tbody = document.getElementById('gridBody');
   if (!tbody) return;
@@ -189,11 +272,12 @@ function renderTable() {
   if (!list.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    tr.innerHTML = '<td colspan="10">' +
+    tr.innerHTML = '<td colspan="24">' +
       (records.length ? 'По запросу «' + escapeHtml(searchQuery) + '» ничего не найдено'
                       : 'В представлении нет записей') + '</td>';
     tbody.appendChild(tr);
-    document.getElementById('rowCount').textContent = '0 записей';
+    document.getElementById('rowCount').textContent = '0 записей' +
+      (datasetSnapshot ? ' из ' + datasetSnapshot.recordCount : '');
     applyColumnVisibility();
     return;
   }
@@ -208,17 +292,34 @@ function renderTable() {
       '<td class="col-check"><input type="checkbox" aria-label="Выбрать заявку ' + escapeHtml(row.application_id) + '" ' +
         (selectedRows.has(row.row_id) ? 'checked' : '') + ' onclick="toggleRow(event,\'' + row.row_id + '\')"></td>' +
       '<td class="col-num">' + (idx + 1) + '</td>' +
+      '<td class="col-ref" data-col="application_id">' + escapeHtml(row.application_id) + '</td>' +
       '<td class="col-primary" data-col="project_name" title="' + escapeHtml(row.application_id) + ' · ' + escapeHtml(row.project_name) + '"><span class="cell">' + escapeHtml(row.project_name) + '</span></td>' +
+      '<td data-col="project_description" title="' + escapeHtml(row.project_description) + '"><span class="cell">' + escapeHtml(row.project_description) + '</span></td>' +
       '<td data-col="company_name" title="' + escapeHtml(row.company_name) + '"><span class="cell">' + escapeHtml(row.company_name) + '</span></td>' +
+      '<td data-col="company_inn">' + escapeHtml(row.company_inn) + '</td>' +
+      '<td data-col="company_email">' + escapeHtml(row.company_email) + '</td>' +
+      '<td data-col="company_phone">' + escapeHtml(row.company_phone) + '</td>' +
       '<td data-col="company_city">' + escapeHtml(row.company_city) + '</td>' +
+      '<td data-col="requester_fio">' + escapeHtml(row.requester_fio) + '</td>' +
+      '<td data-col="requester_email">' + escapeHtml(row.requester_email) + '</td>' +
+      '<td data-col="requester_phone">' + escapeHtml(row.requester_phone) + '</td>' +
+      '<td data-col="project_type">' + escapeHtml(row.project_type) + '</td>' +
+      '<td data-col="priority">' + escapeHtml(row.priority) + '</td>' +
       '<td data-col="budget">' + escapeHtml(row.budget) + '</td>' +
+      '<td data-col="currency">' + escapeHtml(row.currency) + '</td>' +
       '<td data-col="planned_start">' + escapeHtml(row.planned_start) + '</td>' +
       '<td data-col="planned_end">' + escapeHtml(row.planned_end) + '</td>' +
       '<td data-col="status"><span class="badge ' + st.cls + '"><span class="dot"></span>' + escapeHtml(st.label) + '</span></td>' +
+      '<td data-col="comment" title="' + escapeHtml(row.comment) + '"><span class="cell">' + escapeHtml(row.comment) + '</span></td>' +
+      '<td class="relation-cell">' + renderRelationChip(row.company_link, 'Компания') + '</td>' +
+      '<td class="relation-cell">' + renderRelationChip(row.duplicate_link, 'Дубликат') + '</td>' +
       '<td data-col="validation"><span class="badge ' + chk.cls + '"><span class="dot"></span>' + escapeHtml(chk.label) + '</span></td>';
     tbody.appendChild(tr);
   });
-  document.getElementById('rowCount').textContent = list.length + ' ' + recordsWord(list.length);
+  document.getElementById('rowCount').textContent = list.length + ' ' + recordsWord(list.length) +
+    (datasetSnapshot && datasetSnapshot.recordCount > records.length
+      ? ' показано из ' + datasetSnapshot.recordCount
+      : '');
   applyColumnVisibility();
 }
 
@@ -338,6 +439,25 @@ function collectRuleChanges() {
 }
 
 function computeSummary() {
+  if (fullDatasetMode && activeChangeSet) {
+    const s = activeChangeSet.summary;
+    const blockingRecords = new Set(activeChangeSet.issues
+      .filter(issue => issue.severity === 'error')
+      .map(issue => issue.recordId)).size;
+    return {
+      total: s.records,
+      changes: s.actions,
+      attention: s.attention,
+      blocking: s.blocking,
+      ready: Math.max(0, s.records - blockingRecords),
+      duplicateClusters: s.duplicates,
+      duplicateMembers: s.duplicates,
+      companiesAutoMatched: s.matches,
+      companiesManualReview: 0,
+      employeesAutoMatched: 0,
+      typesManualReview: 0,
+    };
+  }
   const issues = scope.reduce((acc, r) => acc.concat(r._validationIssues || []), []);
   return {
     total: scope.length,
@@ -373,13 +493,74 @@ function statusRow(label, value, tone) {
 
 function ruleList(rules) {
   if (!rules.length) return '';
-  return '<div class="rule-list">' + rules.map(r =>
-    '<div class="rule-row"><span class="rr-name">' + escapeHtml(r.meta.name) + '</span>' +
-    '<span class="rr-count">' + r.items.length + '</span></div>').join('') + '</div>';
+  // reportRules разбит на страницы по 50, поэтому одно правило встречается
+  // несколько раз: в сводке страницы схлопываются обратно в одну строку.
+  const merged = new Map();
+  rules.forEach(rule => {
+    const current = merged.get(rule.meta.key);
+    if (current) current.count += rule.items.length;
+    else merged.set(rule.meta.key, { name: rule.meta.name, count: rule.items.length });
+  });
+  return '<div class="rule-list">' + [...merged.values()].map(rule =>
+    '<div class="rule-row"><span class="rr-name">' + escapeHtml(rule.name) + '</span>' +
+    '<span class="rr-count">' + rule.count + '</span></div>').join('') + '</div>';
 }
 
 function launchReportLink() {
   return '<p style="margin-top:10px"><a href="#" onclick="event.preventDefault(); openLaunchReport();">Итоговый отчёт запуска →</a></p>';
+}
+
+/* Спорные значения детерминированно не чинятся. Разбор — отдельное явное
+   действие: только по нему данные уходят во внешний сервис. Ответ модели
+   становится обычным предложением и применяется при публикации. */
+function ambiguousCount() {
+  if (!activeChangeSet) return 0;
+  return activeChangeSet.issues.filter(issue => issue.code === 'UNRECOGNIZED_CITY').length;
+}
+
+function ambiguousBanner() {
+  const count = ambiguousCount();
+  if (!count) return '';
+  const already = activeChangeSet.actions.some(action => action.kind === 'ai');
+  return '<div class="ambiguous-box"><b>Спорных значений: ' + count + '</b>' +
+    '<p>Опечатки и сокращения, которые правила не восстанавливают.</p>' +
+    (already
+      ? '<p class="settings-hint">Разбор выполнен, предложения добавлены в список изменений.</p>'
+      : '<button class="btn-ghost block" onclick="resolveAmbiguous()">Разобрать с помощью AI</button>') +
+    '</div>';
+}
+
+async function resolveAmbiguous() {
+  if (!activeChangeSet) return;
+  try {
+    const outcome = await window.API.createAiSuggestions(activeChangeSet.id);
+    // Решения пользователя ещё не сохранены на backend, поэтому пересборка
+    // обнулила бы их. Сохраняем прежний выбор и добавляем новые предложения
+    // подтверждёнными — как и все остальные; применятся при публикации.
+    const previous = new Set(acceptedChanges);
+    reportFromChangeSet(outcome.changeSet, false);
+    outcome.changeSet.actions
+      .filter(action => action.kind === 'ai' && action.decision === 'pending')
+      .forEach(action => previous.add(action.id));
+    acceptedChanges = previous;
+    renderWidget();
+    showToast(outcome.added
+      ? 'Добавлено предложений: ' + outcome.added + '. Применятся при публикации.'
+      : 'Модель не нашла уверенных соответствий');
+  } catch (error) {
+    showToast(error.status === 503
+      ? 'AI-разбор недоступен: на backend нет ключа Groq'
+      : error.message);
+  }
+}
+
+function relationOverview(summary) {
+  return '<div class="block-label relation-title">Связи</div><div class="relation-map">' +
+    '<div><span class="relation-box source">Заявки</span><span class="relation-arrow">→</span>' +
+    '<span class="relation-box target">Компании</span><b>' + summary.companiesAutoMatched + '</b></div>' +
+    '<div><span class="relation-box source">Заявки</span><span class="relation-arrow dashed">⇢</span>' +
+    '<span class="relation-box warning">Возможные дубли</span><b>' + summary.duplicateMembers + '</b></div>' +
+    '</div>';
 }
 
 /* ============================================================
@@ -484,9 +665,12 @@ function renderWidget() {
     loading.hidden = true;
     result.hidden = true;
     const scopeNow = getScope();
-    document.getElementById('sourceCount').textContent = scopeNow.length === records.length
-      ? records.length + ' ' + recordsWord(records.length)
-      : 'выбрано ' + scopeNow.length + ' из ' + records.length;
+    const fullExport = datasetSnapshot && datasetSnapshot.recordCount > records.length;
+    document.getElementById('sourceCount').textContent = scopeNow.length !== records.length
+      ? 'выбрано ' + scopeNow.length + ' из ' + records.length
+      : fullExport
+        ? 'первые ' + DATASET_BATCH + ' из ' + datasetSnapshot.recordCount
+        : records.length + ' ' + recordsWord(records.length);
     document.getElementById('introDisabledFields').innerHTML = disabledFieldsBanner();
     setActions(
       { label: 'Проверить данные', onClick: runValidation, disabled: !records.length },
@@ -504,19 +688,24 @@ function renderWidget() {
   const rows = document.getElementById('statusRows');
 
   if (applyMode) {
-    title.textContent = 'Изменения применены';
+    title.textContent = 'Версия опубликована';
     sub.textContent = appliedChangeCount + ' ' + changesWord(appliedChangeCount) + ' в ' +
-      appliedRecordCount + ' ' + pluralRu(appliedRecordCount, 'записи', 'записях', 'записях');
+      appliedRecordCount + ' ' + pluralRu(appliedRecordCount, 'записи', 'записях', 'записях') +
+      (fullDatasetMode && datasetSnapshot
+        ? ' · разобраны первые ' + appliedRecordCount + ' из ' + datasetSnapshot.recordCount
+        : '');
     rows.innerHTML = '<div class="block-label">Что изменено</div>' + ruleList(appliedSnapshot) + disabledFieldsBanner() + launchReportLink();
-    setActions(null, { label: 'Отменить изменения', variant: 'ghost', onClick: resetNormalizations });
+    setActions(null, { label: 'Подготовить откат', variant: 'ghost', onClick: prepareRollback });
     return;
   }
 
   const s = computeSummary();
   const pct = s.total ? Math.round((s.ready / s.total) * 100) : 0;
   title.textContent = 'Проверка завершена';
-  sub.textContent = s.total + ' ' + recordsWord(s.total) + ' · ' +
-    s.changes + ' ' + pluralRu(s.changes, 'предложение', 'предложения', 'предложений');
+  sub.textContent = (fullDatasetMode && datasetSnapshot
+      ? 'первые ' + s.total + ' из ' + datasetSnapshot.recordCount + ' ' + recordsWord(datasetSnapshot.recordCount)
+      : s.total + ' ' + recordsWord(s.total)) +
+    ' · ' + s.changes + ' ' + pluralRu(s.changes, 'предложение', 'предложения', 'предложений');
 
   rows.innerHTML =
     statusRow('Готовы к запуску (порог 70%)', pct + '% (' + s.ready + ' из ' + s.total + ')', pct >= 70 ? 'accent' : 'amber') +
@@ -527,7 +716,7 @@ function renderWidget() {
     (s.companiesManualReview ? statusRow('Компания — нужен ручной выбор', s.companiesManualReview, 'amber') : '') +
     (s.typesManualReview ? statusRow('Тип проекта — нужен ручной выбор', s.typesManualReview, 'amber') : '') +
     (s.duplicateClusters ? statusRow('Найдено дублей', s.duplicateClusters + ' групп / ' + s.duplicateMembers + ' заявок', 'amber') : '') +
-    disabledFieldsBanner() + launchReportLink();
+    relationOverview(s) + ambiguousBanner() + disabledFieldsBanner() + launchReportLink();
 
   if (s.changes) {
     setActions(
@@ -543,76 +732,94 @@ function renderWidget() {
    состояние «выполняется» успело отрисоваться и не мигало. */
 const RUN_MIN_MS = 400;
 
-function runValidation() {
+async function runValidation() {
   if (isRunning) return;
   scope = getScope(); // фиксируем область именно на момент запуска
   isRunning = true;
   renderWidget();
-  setTimeout(() => {
+  try {
+    const parentId = activeChangeSet ? activeChangeSet.id : undefined;
+    copilotContext = null;
+    fullDatasetMode = selectedRows.size === 0 && datasetSnapshot && datasetSnapshot.recordCount > records.length;
+    const draftPromise = fullDatasetMode
+      ? window.API.createDatasetChangeSet(parentId, DATASET_BATCH)
+      : window.API.createChangeSet(toApiRecords(scope), parentId);
+    await Promise.all([
+      draftPromise.then(draft => { reportFromChangeSet(draft, true); }),
+      new Promise(resolve => setTimeout(resolve, RUN_MIN_MS))
+    ]);
     applyMode = false;
     hasRun = true;
     validateAll();
-    reportRules = collectRuleChanges();
-    acceptedChanges = new Set(reportRules.flatMap(rule => rule.items.map(change => change.id)));
+  } catch (error) {
+    reportRules = [];
+    showToast(error.message || 'Не удалось сохранить draft');
+  } finally {
     isRunning = false;
     renderTable();
     renderWidget();
-  }, RUN_MIN_MS);
+  }
 }
 
 /* ---------- применение и откат ---------- */
 
-function applyNormalizations() {
+async function applyNormalizations() {
+  if (!activeChangeSet || activeChangeSet.status !== 'draft') return;
+  const decisions = activeChangeSet.actions.map(action => ({
+    actionId: action.id,
+    decision: acceptedChanges.has(action.id) ? 'accepted' : 'rejected'
+  }));
+  const button = document.getElementById('reportApplyBtn');
+  button.disabled = true;
+  button.textContent = 'Публикуем…';
+
+  try {
+    activeChangeSet = await window.API.saveDecisions(activeChangeSet.id, decisions);
+    const outcome = fullDatasetMode
+      ? await window.API.publishDatasetChangeSet(activeChangeSet.id)
+      : await window.API.publishChangeSet(activeChangeSet.id, toApiRecords(scope));
+    activeChangeSet = outcome.changeSet;
+    applyApiRecords(outcome.records);
+
   appliedSnapshot = reportRules
     .map(rule => ({ ...rule, items: rule.items.filter(change => acceptedChanges.has(change.id)) }))
     .filter(rule => rule.items.length > 0);
-  const touched = new Set();
-  let applied = 0;
-
-  scope.forEach(row => {
-    (row._validationChanges || []).forEach(c => {
-      const id = row.row_id + '::' + c.field;
-      const selected = c.hidden
-        ? c.field === 'duplicate_group_id' && acceptedChanges.has(row.row_id + '::duplicate_link')
-        : acceptedChanges.has(id);
-      if (!selected) return;
-      if (row[c.field] === c.to) return;
-      row._prevValues = row._prevValues || {};
-      if (!(c.field in row._prevValues)) row._prevValues[c.field] = c.from;
-      row[c.field] = c.to;
-      touched.add(row.row_id);
-      if (!c.hidden) applied++;
-    });
-  });
-
-  appliedChangeCount = applied;
-  appliedRecordCount = touched.size;
+    const appliedActions = activeChangeSet.actions.filter(action => action.result === 'applied');
+    appliedChangeCount = appliedActions.length;
+    appliedRecordCount = new Set(appliedActions.map(action => action.recordId)).size;
   applyMode = true;
 
-  // Пересчёт после применения показывает, что повторный запуск идемпотентен.
-  validateAll();
-  reportRules = appliedSnapshot;
-  renderTable();
-  renderWidget();
-  showToast('Применено ' + applied + ' ' + changesWord(applied) + ' в ' + touched.size + ' ' + recordsWord(touched.size));
+    validateAll();
+    reportRules = appliedSnapshot;
+    closeReport();
+    renderTable();
+    renderWidget();
+    showToast(
+      (outcome.idempotent ? 'Версия уже была опубликована: ' : 'Опубликовано ') +
+      appliedChangeCount + ' ' + changesWord(appliedChangeCount)
+    );
+  } catch (error) {
+    activeChangeSet = await window.API.getChangeSet(activeChangeSet.id).catch(() => activeChangeSet);
+    showToast(error.message || 'Не удалось опубликовать версию');
+    renderReportPage();
+  } finally {
+    button.disabled = false;
+  }
 }
 
-function resetNormalizations() {
-  scope.forEach(row => {
-    if (!row._prevValues) return;
-    Object.keys(row._prevValues).forEach(f => { row[f] = row._prevValues[f]; });
-    delete row._prevValues;
-  });
-  applyMode = false;
-  appliedSnapshot = [];
-  appliedChangeCount = 0;
-  appliedRecordCount = 0;
-  validateAll();
-  reportRules = collectRuleChanges();
-  acceptedChanges = new Set(reportRules.flatMap(rule => rule.items.map(change => change.id)));
-  renderTable();
-  renderWidget();
-  showToast('Изменения отменены, значения возвращены к исходным');
+async function prepareRollback() {
+  if (!activeChangeSet || !['published', 'superseded'].includes(activeChangeSet.status)) return;
+  try {
+    const rollback = fullDatasetMode
+      ? await window.API.createDatasetRollback(activeChangeSet.id)
+      : await window.API.createRollback(activeChangeSet.id, toApiRecords(scope));
+    reportFromChangeSet(rollback, true);
+    applyMode = false;
+    openReport();
+    showToast('Rollback сохранён как Draft #' + rollback.sequence + ' и требует подтверждения');
+  } catch (error) {
+    showToast(error.message || 'Не удалось подготовить откат');
+  }
 }
 
 /* ---------- отчёт «было → стало» ---------- */
@@ -651,7 +858,7 @@ function renderReportFooter() {
   const button = document.getElementById('reportApplyBtn');
   button.hidden = applyMode;
   button.disabled = selected === 0;
-  button.textContent = selected ? 'Применить ' + selected : 'Применить';
+  button.textContent = selected ? 'Опубликовать ' + selected : 'Опубликовать';
 }
 
 function closeReport() {
@@ -679,7 +886,8 @@ function renderReportPage() {
   document.getElementById('reportPageInfo').textContent = page + ' из ' + total;
   document.getElementById('reportRuleBody').innerHTML =
     '<p class="report-reason">' + escapeHtml(meta.reason) + '</p>' +
-    '<p class="report-count">' + count + ' ' + recordsWord(count) + '</p>';
+    '<p class="report-count">' + (rule.ruleTotal || count) + ' ' + recordsWord(rule.ruleTotal || count) +
+      (rule.chunkTotal > 1 ? ' · страница ' + rule.chunkIndex + ' из ' + rule.chunkTotal : '') + '</p>';
 
   const selectedInRule = rule.items.filter(change => acceptedChanges.has(change.id)).length;
   document.getElementById('reportHead').innerHTML =
@@ -697,9 +905,12 @@ function renderReportPage() {
   rule.items.forEach(ch => {
     const tr = document.createElement('tr');
     if (!acceptedChanges.has(ch.id)) tr.classList.add('declined');
+    const confidenceLabels = { high: 'высокая', medium: 'средняя', low: 'низкая' };
     const confTitle = (ch.confidence === null || ch.confidence === undefined)
       ? ''
-      : ' (уверенность движка ' + Math.round(ch.confidence * 100) + '%)';
+      : typeof ch.confidence === 'number'
+        ? ' (уверенность движка ' + Math.round(ch.confidence * 100) + '%)'
+        : ' (уверенность: ' + (confidenceLabels[ch.confidence] || ch.confidence) + ')';
     const toShown = ch.toDisplay || ch.to;
     tr.innerHTML =
       '<td class="col-check"><input type="checkbox" ' + (acceptedChanges.has(ch.id) ? 'checked ' : '') +
@@ -722,23 +933,335 @@ function reportPrev() { if (reportRuleIndex > 0) { reportRuleIndex--; renderRepo
 function reportNext() { if (reportRuleIndex < reportRules.length - 1) { reportRuleIndex++; renderReportPage(); } }
 
 function applyFromReport() {
-  closeReport();
-  applyNormalizations();
+  void applyNormalizations();
+}
+
+/* ---------- версии, история и diff ---------- */
+
+let versionItems = [];
+let selectedVersionId = null;
+let versionActionCursors = [null];
+let versionActionPageIndex = 0;
+let versionActionNextCursor = null;
+
+const VERSION_STATUS = {
+  draft: 'Draft',
+  published: 'Опубликована',
+  superseded: 'Заменена',
+  discarded: 'Отброшена'
+};
+
+function versionTitle(version) {
+  if (version.rollbackOfId) {
+    return (version.status === 'draft' ? 'Rollback Draft #' : 'Rollback #') + version.sequence;
+  }
+  return (version.status === 'draft' ? 'Draft #' : 'Версия #') + version.sequence;
+}
+
+async function openVersions() {
+  document.getElementById('versionsModal').classList.add('show');
+  document.getElementById('versionsList').innerHTML = '<p class="text-muted">Загружаем историю…</p>';
+  try {
+    const response = await window.API.listChangeSets();
+    versionItems = response.items;
+    selectedVersionId = activeChangeSet ? activeChangeSet.id : (versionItems[0] && versionItems[0].id);
+    await renderVersions();
+  } catch (error) {
+    document.getElementById('versionsList').innerHTML = '<p class="settings-hint warn">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+function closeVersions() {
+  document.getElementById('versionsModal').classList.remove('show');
+}
+
+async function selectVersion(id) {
+  selectedVersionId = id;
+  versionActionCursors = [null];
+  versionActionPageIndex = 0;
+  await renderVersions();
+}
+
+async function renderVersions() {
+  const list = document.getElementById('versionsList');
+  if (!versionItems.length) {
+    list.innerHTML = '<p class="text-muted">Версий пока нет. Запустите проверку данных.</p>';
+    document.getElementById('versionDetails').innerHTML = '';
+    return;
+  }
+  list.innerHTML = versionItems.map(version =>
+    '<button type="button" class="version-item ' + (version.id === selectedVersionId ? 'active' : '') + '" ' +
+      'onclick="selectVersion(\'' + version.id + '\')">' +
+      '<span><b>' + escapeHtml(versionTitle(version)) + '</b><small>' +
+        new Date(version.createdAt).toLocaleString('ru-RU') + '</small></span>' +
+      '<span class="version-status status-' + version.status + '">' + escapeHtml(VERSION_STATUS[version.status]) + '</span>' +
+    '</button>'
+  ).join('');
+
+  const version = versionItems.find(item => item.id === selectedVersionId) || versionItems[0];
+  selectedVersionId = version.id;
+  const [history, actionPage] = await Promise.all([
+    window.API.getChangeSetHistory(version.id),
+    window.API.getChangeSetActions(version.id, {
+      cursor: versionActionCursors[versionActionPageIndex],
+      limit: 50,
+    }),
+  ]);
+  versionActionNextCursor = actionPage.nextCursor || null;
+  const others = versionItems.filter(item => item.id !== version.id);
+  const actions = actionPage.items.map(action =>
+    '<tr><td>' + escapeHtml(action.recordId) + '</td><td>' + escapeHtml(action.ruleName) + '</td>' +
+    '<td class="cell-from">' + escapeHtml(action.before || '—') + '</td>' +
+    '<td class="cell-to">' + escapeHtml(action.editedAfter !== undefined ? action.editedAfter : (action.after || '—')) + '</td>' +
+    '<td>' + escapeHtml(action.decision) + ' / ' + escapeHtml(action.result) + '</td></tr>'
+  ).join('');
+  const aiButton = version.actions.length
+    ? '<button class="btn-ghost ai-button" onclick="openAiExplanation(\'' + version.id + '\')">AI-объяснение</button>'
+    : '';
+  const buttons = aiButton + (version.status === 'draft'
+    ? '<button class="btn-ghost" onclick="discardVersion(\'' + version.id + '\')">Отбросить</button>' +
+      '<button class="btn-primary" onclick="continueVersion(\'' + version.id + '\')">Продолжить draft</button>'
+    : (version.status === 'published' || version.status === 'superseded')
+      ? '<button class="btn-primary" onclick="rollbackVersion(\'' + version.id + '\')">Подготовить откат</button>'
+      : '');
+
+  document.getElementById('versionDetails').innerHTML =
+    '<div class="version-detail-head"><div><h3>' + escapeHtml(versionTitle(version)) + '</h3>' +
+      '<p class="text-muted">' + escapeHtml(VERSION_STATUS[version.status]) + ' · ' + version.summary.actions + ' ' + changesWord(version.summary.actions) + '</p></div>' +
+      '<div class="version-actions">' + buttons + '</div></div>' +
+    (others.length ? '<label class="compare-control">Сравнить с <select id="compareVersionSelect">' +
+      '<option value="">Выберите версию</option>' + others.map(item => '<option value="' + item.id + '">#' + item.sequence + ' · ' + VERSION_STATUS[item.status] + '</option>').join('') +
+      '</select><button class="btn-ghost" onclick="compareSelectedVersion()">Сравнить</button></label>' : '') +
+    '<div id="versionDiff"></div>' +
+    '<div class="report-table-wrap"><table class="grid report-grid version-grid"><thead><tr><th>Запись</th><th>Правило</th><th>Было</th><th>Стало</th><th>Решение / результат</th></tr></thead>' +
+      '<tbody>' + (actions || '<tr><td colspan="5">Действий нет</td></tr>') + '</tbody></table></div>' +
+    (actionPage.total > 50 ? '<div class="version-action-pager"><button class="btn-ghost" onclick="versionActionsPrev()" ' +
+      (versionActionPageIndex === 0 ? 'disabled' : '') + '>Назад</button><span>Страница ' + (versionActionPageIndex + 1) +
+      ' · ' + actionPage.total + ' действий</span><button class="btn-ghost" onclick="versionActionsNext()" ' +
+      (!versionActionNextCursor ? 'disabled' : '') + '>Далее</button></div>' : '') +
+    '<div class="block-label version-history-title">История</div><div class="version-events">' +
+      history.items.map(event => '<div><b>' + escapeHtml(event.type) + '</b><span>' + new Date(event.createdAt).toLocaleString('ru-RU') + '</span></div>').join('') +
+    '</div>';
+}
+
+function versionActionsPrev() {
+  if (versionActionPageIndex === 0) return;
+  versionActionPageIndex--;
+  void renderVersions();
+}
+
+function versionActionsNext() {
+  if (!versionActionNextCursor) return;
+  versionActionCursors[versionActionPageIndex + 1] = versionActionNextCursor;
+  versionActionPageIndex++;
+  void renderVersions();
+}
+
+async function compareSelectedVersion() {
+  const against = document.getElementById('compareVersionSelect').value;
+  if (!against || !selectedVersionId) return;
+  try {
+    const diff = await window.API.compareChangeSets(selectedVersionId, against);
+    document.getElementById('versionDiff').innerHTML =
+      '<div class="diff-summary"><span>Добавлено <b>' + diff.added.length + '</b></span>' +
+      '<span>Удалено <b>' + diff.removed.length + '</b></span>' +
+      '<span>Изменено <b>' + diff.changed.length + '</b></span></div>';
+  } catch (error) {
+    showToast(error.message || 'Не удалось сравнить версии');
+  }
+}
+
+async function continueVersion(id) {
+  try {
+    const version = await window.API.getChangeSet(id);
+    reportFromChangeSet(version, false);
+    applyMode = false;
+    closeVersions();
+    openReport();
+  } catch (error) {
+    showToast(error.message || 'Не удалось открыть draft');
+  }
+}
+
+async function discardVersion(id) {
+  try {
+    await window.API.discardChangeSet(id);
+    const response = await window.API.listChangeSets();
+    versionItems = response.items;
+    await renderVersions();
+    showToast('Draft отброшен, история сохранена');
+  } catch (error) {
+    showToast(error.message || 'Не удалось отбросить draft');
+  }
+}
+
+async function rollbackVersion(id) {
+  try {
+    scope = getScope();
+    const rollback = await window.API.createRollback(id, toApiRecords(scope));
+    reportFromChangeSet(rollback, true);
+    applyMode = false;
+    closeVersions();
+    openReport();
+    showToast('Rollback сохранён как Draft #' + rollback.sequence);
+  } catch (error) {
+    showToast(error.message || 'Не удалось подготовить откат');
+  }
+}
+
+function renderExplanationList(title, items) {
+  if (!items.length) return '';
+  return '<section class="ai-section"><h3>' + escapeHtml(title) + '</h3><ul>' +
+    items.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></section>';
+}
+
+function renderExplanationResult(attempt) {
+  if (!attempt) return '<p class="text-muted">Для этой версии объяснений ещё нет.</p>';
+  if (attempt.status === 'failed') {
+    return '<div class="ai-error"><b>Последняя попытка не удалась</b><p>' +
+      escapeHtml(attempt.errorMessage || 'Groq недоступен') + '</p></div>';
+  }
+  if (!attempt.response) return '<p class="text-muted">Объяснение готовится…</p>';
+  const output = attempt.response;
+  return '<article class="ai-result"><div class="ai-result-meta">' + escapeHtml(attempt.model) +
+    ' · ' + escapeHtml(attempt.promptVersion) + '</div><p class="ai-summary">' + escapeHtml(output.summary) + '</p>' +
+    renderExplanationList('Основания', output.evidence) +
+    renderExplanationList('Риски и противоречия', output.risks) +
+    renderExplanationList('Открытые вопросы', output.openQuestions) +
+    renderExplanationList('Рекомендуемые действия', output.recommendedActions) + '</article>';
+}
+
+function openCopilot(version) {
+  document.getElementById('widgetPanel').classList.add('copilot-open');
+  document.getElementById('checkPanelBody').hidden = true;
+  document.getElementById('checkPanelActions').hidden = true;
+  document.getElementById('copilotPanel').hidden = false;
+  document.getElementById('copilotToggle').classList.add('active');
+  const context = version || activeChangeSet || null;
+  copilotContext = context;
+  document.getElementById('copilotContext').textContent = context
+    ? versionTitle(context) + ' · ' + context.summary.records + ' ' + recordsWord(context.summary.records) +
+      (fullDatasetMode && datasetSnapshot ? ' из ' + datasetSnapshot.recordCount : '')
+    : (datasetSnapshot
+        ? 'Первые ' + DATASET_BATCH + ' из ' + datasetSnapshot.recordCount + ' записей'
+        : 'Контекст не выбран');
+}
+
+function closeCopilot() {
+  document.getElementById('widgetPanel').classList.remove('copilot-open');
+  document.getElementById('copilotPanel').hidden = true;
+  document.getElementById('checkPanelBody').hidden = false;
+  document.getElementById('checkPanelActions').hidden = false;
+  document.getElementById('copilotToggle').classList.remove('active');
+}
+
+function appendCopilotMessage(role, html) {
+  const host = document.getElementById('copilotMessages');
+  const article = document.createElement('article');
+  article.className = 'copilot-message ' + role;
+  article.innerHTML = html;
+  host.appendChild(article);
+  host.scrollTop = host.scrollHeight;
+  return article;
+}
+
+async function openAiExplanation(id, instruction) {
+  const version = versionItems.find(item => item.id === id) ||
+    (activeChangeSet && activeChangeSet.id === id ? activeChangeSet : null);
+  if (!version) return;
+  // reportFromChangeSet пересобирает acceptedChanges из сохранённых решений.
+  // Для текущего draft решения ещё не сохранены, поэтому пересобирать нельзя:
+  // все подтверждения пользователя обнулились бы.
+  if (!activeChangeSet || activeChangeSet.id !== version.id) reportFromChangeSet(version, false);
+  // Область, а не перечисление: на полной выгрузке в версии десятки тысяч
+  // действий, и список их идентификаторов не проходит ограничение размера тела.
+  const acceptedCount = version.actions.filter(action => action.decision === 'accepted').length;
+  const scope = acceptedCount ? 'accepted' : 'not-rejected';
+  const inScope = acceptedCount ||
+    version.actions.filter(action => action.decision !== 'rejected').length;
+  if (!inScope) {
+    showToast('Нет выбранных действий для объяснения');
+    return;
+  }
+
+  closeVersions();
+  openCopilot(version);
+  const prompt = instruction || 'Объясни изменения, основания, риски и следующие действия';
+  appendCopilotMessage('user', '<p>' + escapeHtml(prompt) + '</p>');
+  const loading = appendCopilotMessage('assistant loading', '<div class="spinner" aria-hidden="true"></div><p>Анализирую сохранённые действия…</p>');
+  try {
+    const attempt = await window.API.createExplanation(id, { scope }, prompt);
+    const coverage = attempt.requestPayload.coverage || {
+      totalActions: attempt.actionIds.length,
+      sampledActions: attempt.requestPayload.actions.length,
+      byRule: {}
+    };
+    const sample = attempt.requestPayload.actions.slice(0, 4).map(action =>
+      '<li><b>' + escapeHtml(action.ruleName) + '</b>: ' + escapeHtml(action.before == null ? '—' : action.before) +
+      ' → ' + escapeHtml(action.after == null ? '—' : action.after) + '</li>'
+    ).join('');
+    loading.className = 'copilot-message assistant';
+    loading.innerHTML =
+      '<div class="copilot-coverage"><b>Охват: ' + coverage.totalActions + ' ' + changesWord(coverage.totalActions) + '</b>' +
+      '<span>В модель передан полный агрегат и ' + coverage.sampledActions + ' маскированных примеров</span></div>' +
+      renderExplanationResult(attempt) +
+      '<details class="copilot-details"><summary>Что использовал AI</summary>' +
+      '<p>Поля: ' + escapeHtml(attempt.disclosedFields.join(', ')) + '</p><p>Модель: ' + escapeHtml(attempt.model) + '</p>' +
+      '<ul>' + sample + '</ul></details>' +
+      '<div class="copilot-result-actions"><button class="btn-ghost" onclick="openReport()">Показать изменения</button>' +
+      '<button class="btn-ghost" onclick="openVersions()">История и конфликты</button></div>' +
+      '<div class="copilot-followups"><button onclick="askCopilot(\'Какие изменения самые рискованные?\')">Самые рискованные?</button>' +
+      '<button onclick="askCopilot(\'Что проверить перед публикацией?\')">Что проверить?</button></div>';
+  } catch (error) {
+    loading.className = 'copilot-message assistant error';
+    loading.innerHTML = '<b>Не удалось получить ответ</b><p>' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+function askCopilot(instruction) {
+  // Панель может быть открыта на конкретной версии из истории: вопрос должен
+  // уходить именно ей, а не текущему draft.
+  const version = copilotContext || activeChangeSet ||
+    versionItems.find(item => item.id === selectedVersionId) || versionItems[0];
+  if (!version) {
+    openCopilot();
+    appendCopilotMessage('assistant error', '<p>Сначала запустите проверку данных, чтобы появился сохранённый Change Set.</p>');
+    return;
+  }
+  return openAiExplanation(version.id, instruction);
+}
+
+function submitCopilot(event) {
+  event.preventDefault();
+  const input = document.getElementById('copilotInput');
+  const instruction = input.value.trim();
+  if (!instruction) return;
+  input.value = '';
+  void askCopilot(instruction);
 }
 
 /* ---------- инициализация ---------- */
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   records.forEach(r => { r._validationIssues = []; r._validationChanges = []; });
   renderTable();
   renderWidget();
+  try {
+    datasetSnapshot = await window.API.getDatasetSnapshot();
+    document.getElementById('rowCount').textContent = records.length + ' показано из ' +
+      datasetSnapshot.recordCount + ' ' + recordsWord(datasetSnapshot.recordCount);
+    renderWidget();
+  } catch (_) {
+    // Демо остаётся работоспособным на встроенных строках без backend snapshot.
+  }
 });
 
 /* Модалка удерживает фокус, пока открыта. */
 const FOCUSABLE = 'button:not([disabled]):not([hidden]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function trapFocus(e) {
-  const openModal = document.querySelector('.modal-overlay.show .modal');
+  const modals = document.querySelectorAll('.modal-overlay.show .modal');
+  const openModal = modals[modals.length - 1];
   if (!openModal) return;
   const items = Array.from(openModal.querySelectorAll(FOCUSABLE)).filter(el => el.offsetParent !== null);
   if (!items.length) return;
@@ -757,12 +1280,14 @@ function trapFocus(e) {
 }
 
 document.addEventListener('keydown', e => {
-  const openModal = document.querySelector('.modal-overlay.show');
+  const modals = document.querySelectorAll('.modal-overlay.show');
+  const openModal = modals[modals.length - 1];
   if (!openModal) return;
   if (e.key === 'Escape') {
     if (openModal.id === 'reportModal') closeReport();
     else if (openModal.id === 'settingsModal') closeSettings();
     else if (openModal.id === 'launchModal') closeLaunchReport();
+    else if (openModal.id === 'versionsModal') closeVersions();
   } else if (e.key === 'Tab') {
     trapFocus(e);
   }

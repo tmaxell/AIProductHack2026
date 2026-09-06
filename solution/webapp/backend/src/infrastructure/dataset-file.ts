@@ -10,16 +10,45 @@ import {
   type CompanyReference,
 } from '../domain/matching/index.js';
 import { parseCsvRecords } from './csv.js';
+import type { SourceRecord } from '../domain/change-set.js';
+import { fingerprint } from '../domain/fingerprint.js';
+
+export interface DatasetSnapshot {
+  readonly id: string;
+  readonly schemaVersion: string;
+  fingerprint: string;
+  records: readonly SourceRecord[];
+}
 
 export interface Dataset {
   readonly companies: CompanyIndex;
   readonly applications: ApplicationIndex;
+  readonly snapshot: DatasetSnapshot;
 }
 
 export const EMPTY_DATASET: Dataset = {
   companies: EMPTY_INDEX,
   applications: EMPTY_APPLICATION_INDEX,
+  snapshot: { id: 'empty', schemaVersion: '0', fingerprint: fingerprint([]), records: [] },
 };
+
+const APPLICATION_FIELDS = [
+  'application_id', 'project_name', 'project_description', 'company_name', 'company_inn',
+  'company_email', 'company_phone', 'company_city', 'requester_fio', 'requester_email',
+  'requester_phone', 'project_type', 'priority', 'budget', 'currency', 'planned_start',
+  'planned_end', 'status', 'comment',
+] as const;
+
+function toSourceRecord(row: Record<string, string>): SourceRecord {
+  const values: Record<string, string | null> = {};
+  for (const field of APPLICATION_FIELDS) {
+    const csvField = field === 'status' ? 'project_status_raw' : `${field}_raw`;
+    values[field] = row[csvField] || null;
+  }
+  values.company_ref_id = null;
+  values.duplicate_of = null;
+  return { id: row.row_id ?? '', values };
+}
 
 function toReference(row: Record<string, string>): CompanyReference {
   return {
@@ -81,10 +110,21 @@ export async function loadDataset(
     .map(toApplication)
     .filter((application) => application.id !== '');
 
+  const sourceRecords = rows
+    .filter((row) => row.record_type === 'APPLICATION')
+    .map(toSourceRecord)
+    .filter((record) => record.id !== '');
+
   log(`набор данных загружен: ${references.length} компаний, ${applications.length} заявок`);
 
   return {
     companies: buildCompanyIndex(references),
     applications: buildApplicationIndex(applications),
+    snapshot: {
+      id: rows.find((row) => row.dataset_id)?.dataset_id || 'dataset',
+      schemaVersion: rows.find((row) => row.schema_version)?.schema_version || '1',
+      fingerprint: fingerprint(sourceRecords),
+      records: sourceRecords,
+    },
   };
 }

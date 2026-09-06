@@ -8,7 +8,7 @@
 | Трек | Где | Что это |
 |---|---|---|
 | **Widget Script** | `solution/src`, `build`, `devtools`, `dist`, `plan`, `docs` | Код, который встраивается в реальное пространство MWS Tables и собирается в один файл `dist/widget.bundle.js`. Без зависимостей и без сборщика. |
-| **Веб-приложение** | [`solution/webapp/`](webapp/README.md) | Самостоятельное приложение: статический фронтенд за nginx и backend на Fastify + TypeScript, всё в Docker. |
+| **Веб-приложение** | [`solution/webapp/`](webapp/README.md) | Самостоятельное приложение: статический фронтенд за nginx, Fastify + TypeScript backend, персистентный Change Set API и необязательное backend-only объяснение Groq, всё в Docker. |
 
 Треки разрабатываются параллельно и **разделены на уровне репозитория**:
 

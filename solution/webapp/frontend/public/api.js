@@ -18,16 +18,16 @@ class ApiError extends Error {
 
 const UNAVAILABLE = 'Сервис недоступен. Проверьте, что backend запущен.';
 
-async function post(path, body) {
+async function request(path, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || TIMEOUT_MS);
 
   let response;
   try {
     response = await fetch(API_BASE + path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      method: options.method || 'GET',
+      headers: options.body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
     });
   } catch (cause) {
@@ -50,11 +50,87 @@ async function post(path, body) {
   return payload;
 }
 
+function post(path, body) { return request(path, { method: 'POST', body }); }
+function patch(path, body) { return request(path, { method: 'PATCH', body }); }
+
 window.API = {
   ApiError,
 
   /** Черновик набора изменений. Ничего не изменяет. */
-  createChangeSet: (records) => post('/change-sets', { records }),
+  createChangeSet: (records, parentId) =>
+    post('/change-sets', { records, ...(parentId ? { parentId } : {}) }),
+
+  getDatasetSnapshot: () => request('/dataset-snapshots/current'),
+
+  getDatasetRecords: (cursor, limit = 50, q = '') => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    if (q) params.set('q', q);
+    return request('/dataset-snapshots/current/records?' + params.toString());
+  },
+
+  createDatasetChangeSet: (parentId, limit) =>
+    post('/dataset-snapshots/current/change-sets', {
+      ...(parentId ? { parentId } : {}), ...(limit ? { limit } : {})
+    }),
+
+  listChangeSets: (status) => request('/change-sets' + (status ? '?status=' + encodeURIComponent(status) : '')),
+
+  getChangeSet: (id) => request('/change-sets/' + encodeURIComponent(id)),
+
+  getChangeSetActions: (id, options = {}) => {
+    const params = new URLSearchParams({ limit: String(options.limit || 50) });
+    ['cursor', 'ruleCode', 'decision', 'result', 'recordQuery'].forEach(key => {
+      if (options[key]) params.set(key, options[key]);
+    });
+    return request('/change-sets/' + encodeURIComponent(id) + '/actions?' + params.toString());
+  },
+
+  saveDecisions: (id, actions) =>
+    patch('/change-sets/' + encodeURIComponent(id) + '/decisions', { actions }),
+
+  compareChangeSets: (id, against) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/diff?against=' + encodeURIComponent(against)),
+
+  getChangeSetHistory: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/history'),
+
+  /** selection — либо {scope}, либо {actionIds} для точечной выборки. */
+  previewExplanation: (id, selection) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/explanation-preview', selection),
+
+  createExplanation: (id, selection, instruction) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/explanations', {
+      method: 'POST',
+      body: { ...selection, ...(instruction ? { instruction } : {}) },
+      timeoutMs: 60000
+    }),
+
+  getAiSuggestionStatus: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/ai-suggestions'),
+
+  /** Явное действие: только здесь спорные значения уходят во внешний сервис. */
+  createAiSuggestions: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/ai-suggestions', {
+      method: 'POST', body: {}, timeoutMs: 60000
+    }),
+
+  listExplanations: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/explanations'),
+
+  publishChangeSet: (id, records) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/publish', { records }),
+
+  publishDatasetChangeSet: (id) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/publish-current'),
+
+  createRollback: (id, records) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/rollback', { records }),
+
+  createDatasetRollback: (id) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/rollback-current'),
+
+  discardChangeSet: (id) => post('/change-sets/' + encodeURIComponent(id) + '/discard'),
 
   /** Применение только подтверждённых действий. */
   applyChangeSet: (records, sourceFingerprint, actionIds) =>

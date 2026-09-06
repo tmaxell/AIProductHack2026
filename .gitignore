@@ -31,6 +31,7 @@ tmp/
 temp/
 .tmp/
 solution/devtools/reports/
+solution/webapp/backend/var/
 
 # Generated data: keep only its policy file
 data/derived/*

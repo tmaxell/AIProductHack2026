@@ -25,7 +25,7 @@ export interface SourceRecord {
 }
 
 /** Нормализация чинит формат значения, сопоставление связывает со справочником. */
-export type ActionKind = 'normalize' | 'match' | 'duplicate';
+export type ActionKind = 'normalize' | 'match' | 'duplicate' | 'ai';
 
 /** Одно предлагаемое изменение одного поля одной записи. */
 export interface ChangeAction {
@@ -86,8 +86,22 @@ const COMPANY_RULE = {
   group: 'Справочники',
 } as const;
 
+/**
+ * Каноническое название берётся из справочника, а не выводится эвристикой.
+ * Это закрывает разом латиницу («Most Profil»), город в конце названия
+ * («Решение Мастер Владивосток») и разнобой регистра: у записи справочника
+ * есть и короткое название, и алиасы всех этих написаний.
+ */
+const COMPANY_NAME_RULE = {
+  code: 'company_canonical_name',
+  name: 'Название компании по справочнику',
+  reason: 'Замена написания на каноническое из справочника компаний',
+  group: 'Справочники',
+} as const;
+
 function matchAction(record: SourceRecord, index: CompanyIndex): {
   action?: ChangeAction;
+  nameAction?: ChangeAction;
   issue?: RecordIssue;
 } {
   const outcome = matchCompany(
@@ -129,11 +143,12 @@ function matchAction(record: SourceRecord, index: CompanyIndex): {
     };
   }
 
-  const current = record.values[COMPANY_REF_FIELD] ?? null;
-  if (current === outcome.match.reference.id) return {};
+  const evidence = outcome.match.factors.map((factor) => factor.label);
+  const result: { action?: ChangeAction; nameAction?: ChangeAction } = {};
 
-  return {
-    action: {
+  const currentRef = record.values[COMPANY_REF_FIELD] ?? null;
+  if (currentRef !== outcome.match.reference.id) {
+    result.action = {
       kind: 'match',
       id: actionId(record.id, COMPANY_RULE.code),
       recordId: record.id,
@@ -142,12 +157,33 @@ function matchAction(record: SourceRecord, index: CompanyIndex): {
       ruleName: COMPANY_RULE.name,
       reason: COMPANY_RULE.reason,
       group: COMPANY_RULE.group,
-      before: current,
+      before: currentRef,
       after: outcome.match.reference.id,
       confidence: outcome.match.confidence,
-      evidence: outcome.match.factors.map((factor) => factor.label),
-    },
-  };
+      evidence,
+    };
+  }
+
+  const canonical = outcome.match.reference.shortName.trim();
+  const currentName = record.values.company_name ?? null;
+  if (canonical !== '' && currentName !== null && currentName.trim() !== canonical) {
+    result.nameAction = {
+      kind: 'match',
+      id: actionId(record.id, COMPANY_NAME_RULE.code),
+      recordId: record.id,
+      field: 'company_name',
+      ruleCode: COMPANY_NAME_RULE.code,
+      ruleName: COMPANY_NAME_RULE.name,
+      reason: COMPANY_NAME_RULE.reason,
+      group: COMPANY_NAME_RULE.group,
+      before: currentName,
+      after: canonical,
+      confidence: outcome.match.confidence,
+      evidence,
+    };
+  }
+
+  return result;
 }
 
 const DUPLICATE_RULE = {
@@ -258,15 +294,35 @@ export function buildChangeSet(
     }
   }
 
-  const normalizations = actions.length;
+  let normalizations = actions.length;
 
   // Сопоставление идёт после нормализации: у него отдельный смысл и отдельная
   // строка в сводке — это рекомендация связи, а не исправление формата.
   if (references.companies.size > 0) {
+    // Каноническое название заменяет собой обычную нормализацию того же поля:
+    // два предложения на одно поле пользователь подтвердить не сможет.
+    const supersededNames = new Set<string>();
     for (const record of records) {
-      const { action, issue: found } = matchAction(record, references.companies);
+      const { action, nameAction, issue: found } = matchAction(record, references.companies);
       if (action) actions.push(action);
+      if (nameAction) {
+        actions.push(nameAction);
+        supersededNames.add(nameAction.recordId);
+      }
       if (found) issues.push(found);
+    }
+    if (supersededNames.size > 0) {
+      // Один проход фильтром: splice в цикле по десяткам тысяч действий
+      // давал квадратичную сложность и заваливал разбор всей выгрузки.
+      const kept = actions.filter((candidate) => {
+        const superseded = candidate.kind === 'normalize' &&
+          candidate.field === 'company_name' &&
+          supersededNames.has(candidate.recordId);
+        if (superseded) normalizations -= 1;
+        return !superseded;
+      });
+      actions.length = 0;
+      actions.push(...kept);
     }
   }
 

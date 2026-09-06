@@ -27,3 +27,16 @@ test('список CORS-origin разбирается через запятую'
     'http://b',
   ]);
 });
+
+test('Groq выключен без ключа и не принимает опасные значения retry', () => {
+  expect(loadConfig({})).toMatchObject({
+    groqBaseUrl: 'https://api.groq.com/openai/v1',
+    groqModel: 'openai/gpt-oss-20b',
+    groqStructuredOutput: 'strict',
+    groqTimeoutMs: 15_000,
+    groqMaxRetries: 2,
+    groqMaxCompletionTokens: 1200,
+  });
+  expect(loadConfig({}).groqApiKey).toBeUndefined();
+  expect(() => loadConfig({ GROQ_MAX_RETRIES: '20' })).toThrow(/GROQ_MAX_RETRIES/);
+});

@@ -1,17 +1,20 @@
 # Backend веб-приложения
 
-Fastify 5 + TypeScript, Node.js 22+. Внешних сервисов и базы данных нет.
+Fastify 5 + TypeScript, Node.js 22+. Версии Change Set хранятся в локальном
+SQLite-файле. Необязательный Groq-провайдер включается только backend-ключом;
+без него детерминированный сценарий работает полностью.
 
 ## Слои
 
 ```text
 src/
+├── application/  # сценарии версий, публикации и rollback
 ├── index.ts        # точка входа: старт сервера и graceful shutdown
 ├── app.ts          # buildApp(): плагины, схемы, маршруты, обработка ошибок
 ├── config.ts       # чтение и валидация переменных окружения
 ├── contracts/      # TypeBox-схемы = одновременно валидация, OpenAPI и типы
 ├── routes/v1/      # HTTP-слой: только разбор запроса и вызов домена
-├── infrastructure/ # ввод-вывод: чтение CSV и загрузка справочника
+├── infrastructure/ # CSV, SQLite-репозиторий и миграции
 └── domain/         # чистая логика без HTTP, см. domain/README.md
 ```
 
@@ -36,19 +39,49 @@ npm run build      # компиляция в dist/
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| `GET` | `/api/v1/health` | состояние сервиса, используется healthcheck'ом |
-| `POST` | `/api/v1/change-sets` | проанализировать записи, вернуть черновик набора изменений |
-| `POST` | `/api/v1/change-sets/apply` | применить подтверждённые действия |
+| `GET` | `/api/v1/health` | состояние сервиса, размеры справочника и корпуса, доступность AI |
+| `POST` | `/api/v1/change-sets` | draft по переданным записям |
+| `GET` | `/api/v1/change-sets` | история версий |
+| `GET` | `/api/v1/change-sets/:id` | сохранённая версия |
+| `GET` | `/api/v1/change-sets/:id/actions` | страница действий с фильтрами и агрегатами |
+| `PATCH` | `/api/v1/change-sets/:id/decisions` | решения пользователя по действиям |
+| `GET` | `/api/v1/change-sets/:id/diff` | сравнение двух версий |
+| `GET` | `/api/v1/change-sets/:id/history` | append-only история событий |
+| `POST` | `/api/v1/change-sets/:id/publish` | публикация подтверждённых действий |
+| `POST` | `/api/v1/change-sets/:id/rollback` | компенсирующий rollback-draft |
+| `POST` | `/api/v1/change-sets/:id/discard` | отбросить draft, история сохраняется |
+| `GET` | `/api/v1/dataset-snapshots/current` | метаданные выгрузки |
+| `GET` | `/api/v1/dataset-snapshots/current/records` | чтение выгрузки страницами |
+| `POST` | `/api/v1/dataset-snapshots/current/change-sets` | draft по выгрузке, `limit` ограничивает партию |
+| `POST` | `/api/v1/change-sets/:id/publish-current` | публикация относительно snapshot backend |
+| `POST` | `/api/v1/change-sets/:id/rollback-current` | rollback относительно snapshot backend |
+| `POST` | `/api/v1/change-sets/:id/explanation-preview` | что именно уйдёт в Groq |
+| `POST` | `/api/v1/change-sets/:id/explanations` | явный запрос объяснения |
+| `GET` | `/api/v1/change-sets/:id/explanations` | история попыток объяснения |
+| `GET` | `/api/v1/change-sets/:id/ai-suggestions` | сколько спорных значений ждёт разбора |
+| `POST` | `/api/v1/change-sets/:id/ai-suggestions` | разбор спорных значений моделью |
 | `GET` | `/api/v1/docs` | Swagger UI, только при `APP_EXPOSE_DOCS=true` |
 
-`POST /change-sets` ничего не изменяет и возвращает два вида действий:
-исправления формата (`kind: normalize`) и предложенные связи со справочником
-компаний (`kind: match`, с уровнем уверенности и перечнем совпавших признаков).
+Ничего не изменяет: создание draft, чтение выгрузки, `explanation-preview`
+и `GET /ai-suggestions`.
 
-`POST /change-sets` ничего не изменяет. `POST /change-sets/apply` применяет
-только действия из `actionIds` и требует `sourceFingerprint` из черновика:
-если исходные данные изменились после анализа, операция отклоняется `409`,
-а не выполняется поверх устаревшего набора. Действие вне набора — `422`.
+Наружу обращаются только `POST /explanations` и `POST /ai-suggestions` — оба по
+явному действию пользователя.
+
+`publish` и `apply` требуют `sourceFingerprint` из черновика: если исходные
+данные изменились после анализа, операция отклоняется `409`, а не выполняется
+поверх устаревшего набора. Действие вне набора — `422`.
+
+## Виды действий
+
+| Вид | Откуда берётся | Есть ли уверенность |
+|---|---|---|
+| `normalize` | детерминированное правило из `domain/rules.ts` | нет |
+| `match` | сопоставление со справочником компаний | да |
+| `duplicate` | похожая заявка в корпусе | да |
+| `ai` | разбор спорного значения моделью | да |
+
+Все четыре подтверждаются одинаково и попадают в данные только при публикации.
 
 ## Справочник компаний
 
