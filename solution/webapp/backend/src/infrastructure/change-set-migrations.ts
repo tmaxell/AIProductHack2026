@@ -67,4 +67,27 @@ export const CHANGE_SET_MIGRATIONS: readonly Migration[] = [
         WHERE rollback_of_id IS NOT NULL AND status = 'draft';
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE change_set_explanations (
+        id TEXT PRIMARY KEY,
+        change_set_id TEXT NOT NULL REFERENCES change_sets(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+        model TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        action_ids_json TEXT NOT NULL,
+        disclosed_fields_json TEXT NOT NULL,
+        request_payload_json TEXT NOT NULL,
+        response_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE INDEX idx_change_set_explanations_version
+        ON change_set_explanations(change_set_id, created_at DESC);
+    `,
+  },
 ];

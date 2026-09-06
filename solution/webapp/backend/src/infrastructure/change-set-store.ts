@@ -4,6 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import type { ChangeSet, SourceRecord } from '../domain/change-set.js';
 import type {
+  ExplanationOutput,
+  ExplanationPayload,
+  ExplanationPreview,
+} from '../domain/explanation.js';
+import type {
   ActionDecisionUpdate,
   ActionExecutionResult,
   ChangeSetEvent,
@@ -54,6 +59,22 @@ export interface CreateDraftOptions {
   readonly rollbackOfId?: string;
   readonly actions?: readonly VersionedAction[];
   readonly eventType?: string;
+}
+
+export interface StoredExplanation {
+  readonly id: string;
+  readonly changeSetId: string;
+  readonly status: 'pending' | 'completed' | 'failed';
+  readonly model: string;
+  readonly promptVersion: string;
+  readonly actionIds: readonly string[];
+  readonly disclosedFields: readonly string[];
+  readonly requestPayload: ExplanationPayload;
+  readonly response?: ExplanationOutput;
+  readonly errorCode?: string;
+  readonly errorMessage?: string;
+  readonly createdAt: string;
+  readonly completedAt?: string;
 }
 
 export class SqliteChangeSetStore {
@@ -405,6 +426,125 @@ export class SqliteChangeSetStore {
       createdAt: requiredString(row, 'created_at'),
       payload: parseJson<Readonly<Record<string, unknown>>>(requiredString(row, 'payload_json')),
     }));
+  }
+
+  createExplanation(
+    changeSetId: string,
+    model: string,
+    promptVersion: string,
+    preview: ExplanationPreview,
+  ): StoredExplanation {
+    const id = `exp_${randomUUID()}`;
+    const now = new Date().toISOString();
+    this.transaction(() => {
+      this.require(changeSetId);
+      this.db
+        .prepare(
+          `INSERT INTO change_set_explanations(
+             id, change_set_id, status, model, prompt_version, action_ids_json,
+             disclosed_fields_json, request_payload_json, created_at
+           ) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          changeSetId,
+          model,
+          promptVersion,
+          JSON.stringify(preview.actionIds),
+          JSON.stringify(preview.fields),
+          JSON.stringify(preview.payload),
+          now,
+        );
+      this.insertEvent(changeSetId, 'explanation.requested', {
+        explanationId: id,
+        model,
+        promptVersion,
+        actionIds: preview.actionIds,
+        disclosedFields: preview.fields,
+      });
+    });
+    return this.requireExplanation(id);
+  }
+
+  completeExplanation(id: string, response: ExplanationOutput): StoredExplanation {
+    this.transaction(() => {
+      const explanation = this.requireExplanation(id);
+      const completedAt = new Date().toISOString();
+      this.db
+        .prepare(
+          `UPDATE change_set_explanations
+           SET status = 'completed', response_json = ?, completed_at = ? WHERE id = ?`,
+        )
+        .run(JSON.stringify(response), completedAt, id);
+      this.insertEvent(explanation.changeSetId, 'explanation.completed', {
+        explanationId: id,
+        model: explanation.model,
+        promptVersion: explanation.promptVersion,
+      });
+    });
+    return this.requireExplanation(id);
+  }
+
+  failExplanation(id: string, code: string, message: string): StoredExplanation {
+    this.transaction(() => {
+      const explanation = this.requireExplanation(id);
+      const completedAt = new Date().toISOString();
+      this.db
+        .prepare(
+          `UPDATE change_set_explanations
+           SET status = 'failed', error_code = ?, error_message = ?, completed_at = ? WHERE id = ?`,
+        )
+        .run(code, message, completedAt, id);
+      this.insertEvent(explanation.changeSetId, 'explanation.failed', {
+        explanationId: id,
+        code,
+      });
+    });
+    return this.requireExplanation(id);
+  }
+
+  listExplanations(changeSetId: string): StoredExplanation[] {
+    this.require(changeSetId);
+    const rows = this.db
+      .prepare(
+        'SELECT id FROM change_set_explanations WHERE change_set_id = ? ORDER BY created_at DESC',
+      )
+      .all(changeSetId) as SqlRow[];
+    return rows.map((row) => this.requireExplanation(requiredString(row, 'id')));
+  }
+
+  private requireExplanation(id: string): StoredExplanation {
+    const row = this.db.prepare('SELECT * FROM change_set_explanations WHERE id = ?').get(id) as
+      | SqlRow
+      | undefined;
+    if (row === undefined) throw new Error(`Попытка объяснения ${id} не найдена`);
+    const explanation: StoredExplanation = {
+      id: requiredString(row, 'id'),
+      changeSetId: requiredString(row, 'change_set_id'),
+      status: requiredString(row, 'status') as StoredExplanation['status'],
+      model: requiredString(row, 'model'),
+      promptVersion: requiredString(row, 'prompt_version'),
+      actionIds: parseJson<readonly string[]>(requiredString(row, 'action_ids_json')),
+      disclosedFields: parseJson<readonly string[]>(requiredString(row, 'disclosed_fields_json')),
+      requestPayload: parseJson<ExplanationPayload>(requiredString(row, 'request_payload_json')),
+      createdAt: requiredString(row, 'created_at'),
+    };
+    const response = row.response_json;
+    const errorCode = optionalString(row, 'error_code');
+    const errorMessage = optionalString(row, 'error_message');
+    const completedAt = optionalString(row, 'completed_at');
+    if (response !== null && response !== undefined) {
+      (explanation as { response: ExplanationOutput }).response =
+        parseJson<ExplanationOutput>(response);
+    }
+    if (errorCode !== undefined) (explanation as { errorCode: string }).errorCode = errorCode;
+    if (errorMessage !== undefined) {
+      (explanation as { errorMessage: string }).errorMessage = errorMessage;
+    }
+    if (completedAt !== undefined) {
+      (explanation as { completedAt: string }).completedAt = completedAt;
+    }
+    return explanation;
   }
 
   count(): number {

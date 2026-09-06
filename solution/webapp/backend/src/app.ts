@@ -5,7 +5,13 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import { ChangeSetExplanationService } from './application/change-set-explanation-service.js';
 import { ChangeSetConflictError, ChangeSetService } from './application/change-set-service.js';
+import {
+  ExplanationProviderError,
+  ExplanationUnavailableError,
+  type ExplanationProvider,
+} from './application/explanation-provider.js';
 import type { AppConfig } from './config.js';
 import { loadDataset, type Dataset } from './infrastructure/dataset-file.js';
 import {
@@ -16,6 +22,8 @@ import {
 } from './infrastructure/change-set-store.js';
 import { API_PREFIX, ErrorResponse } from './contracts/common.js';
 import { CHANGE_SET_SCHEMAS } from './contracts/change-set.js';
+import { EXPLANATION_SCHEMAS } from './contracts/explanation.js';
+import { GroqExplanationProvider } from './infrastructure/groq-explanation-provider.js';
 import { v1Routes } from './routes/v1/index.js';
 
 declare module 'fastify' {
@@ -24,6 +32,7 @@ declare module 'fastify' {
     appVersion: string;
     dataset: Dataset;
     changeSets: ChangeSetService;
+    explanations: ChangeSetExplanationService;
   }
 }
 
@@ -33,7 +42,14 @@ async function readVersion(): Promise<string> {
   return (JSON.parse(raw) as { version?: string }).version ?? '0.0.0';
 }
 
-export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
+export interface BuildAppOptions {
+  readonly explanationProvider?: ExplanationProvider;
+}
+
+export async function buildApp(
+  config: AppConfig,
+  options: BuildAppOptions = {},
+): Promise<FastifyInstance> {
   const app = Fastify({
     logger: { level: config.logLevel },
     // X-Forwarded-* приходят от nginx: без trustProxy в логах будет ip контейнера.
@@ -48,6 +64,22 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   );
   const changeSetStore = new SqliteChangeSetStore(config.storagePath);
   app.decorate('changeSets', new ChangeSetService(changeSetStore, app.dataset));
+  const configuredExplanationProvider = config.groqApiKey === undefined
+    ? undefined
+    : new GroqExplanationProvider({
+        apiKey: config.groqApiKey,
+        baseUrl: config.groqBaseUrl,
+        model: config.groqModel,
+        timeoutMs: config.groqTimeoutMs,
+        maxRetries: config.groqMaxRetries,
+      });
+  app.decorate(
+    'explanations',
+    new ChangeSetExplanationService(
+      changeSetStore,
+      options.explanationProvider ?? configuredExplanationProvider,
+    ),
+  );
   app.addHook('onClose', () => {
     changeSetStore.close();
     return Promise.resolve();
@@ -61,6 +93,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
   app.addSchema(ErrorResponse);
   for (const schema of CHANGE_SET_SCHEMAS) app.addSchema(schema);
+  for (const schema of EXPLANATION_SCHEMAS) app.addSchema(schema);
 
   // Обработчик задаётся до регистрации дочерних route-плагинов: Fastify
   // наследует error handler по encapsulation-иерархии в момент регистрации.
@@ -68,6 +101,8 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     let statusCode = error.statusCode ?? 500;
     if (error instanceof StoredChangeSetNotFoundError) statusCode = 404;
     if (error instanceof UnknownStoredActionsError) statusCode = 422;
+    if (error instanceof ExplanationUnavailableError) statusCode = 503;
+    if (error instanceof ExplanationProviderError) statusCode = error.statusCode;
     if (error instanceof InvalidChangeSetStateError || error instanceof ChangeSetConflictError) {
       statusCode = 409;
     }

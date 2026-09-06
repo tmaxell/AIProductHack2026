@@ -18,7 +18,11 @@ test('health отвечает 200 и описывает сервис', async () 
   const response = await app.inject({ method: 'GET', url: '/api/v1/health' });
 
   expect(response.statusCode).toBe(200);
-  expect(response.json()).toMatchObject({ status: 'ok', env: 'test' });
+  expect(response.json()).toMatchObject({
+    status: 'ok',
+    env: 'test',
+    aiExplanationAvailable: false,
+  });
 });
 
 test('неизвестный маршрут отвечает единым форматом ошибки', async () => {
