@@ -17,7 +17,8 @@ export const healthRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       version: fastify.appVersion,
       env: fastify.appConfig.env,
       uptimeSeconds: Math.round(process.uptime()),
-      referenceCompanies: fastify.companyIndex.size,
+      referenceCompanies: fastify.dataset.companies.size,
+      knownApplications: fastify.dataset.applications.size,
     }),
   );
 

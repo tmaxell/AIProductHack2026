@@ -9,6 +9,9 @@ export const HealthResponse = Type.Object(
     referenceCompanies: Type.Integer({
       description: 'Сколько записей справочника компаний загружено; 0 — сопоставление недоступно',
     }),
+    knownApplications: Type.Integer({
+      description: 'Размер корпуса заявок для поиска дублей; 0 — поиск дублей недоступен',
+    }),
   },
   { $id: 'HealthResponse' },
 );

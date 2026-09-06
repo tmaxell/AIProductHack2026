@@ -6,8 +6,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { AppConfig } from './config.js';
-import type { CompanyIndex } from './domain/matching/index.js';
-import { loadCompanyIndex } from './infrastructure/company-reference-file.js';
+import { loadDataset, type Dataset } from './infrastructure/dataset-file.js';
 import { API_PREFIX, ErrorResponse } from './contracts/common.js';
 import { CHANGE_SET_SCHEMAS } from './contracts/change-set.js';
 import { v1Routes } from './routes/v1/index.js';
@@ -16,7 +15,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     appConfig: AppConfig;
     appVersion: string;
-    companyIndex: CompanyIndex;
+    dataset: Dataset;
   }
 }
 
@@ -36,8 +35,8 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   app.decorate('appConfig', config);
   app.decorate('appVersion', await readVersion());
   app.decorate(
-    'companyIndex',
-    await loadCompanyIndex(config.datasetPath, (message) => { app.log.info(message); }),
+    'dataset',
+    await loadDataset(config.datasetPath, (message: string) => { app.log.info(message); }),
   );
 
   await app.register(helmet, { contentSecurityPolicy: false });

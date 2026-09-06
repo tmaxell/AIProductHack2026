@@ -316,6 +316,7 @@ function renderWidget() {
   let html =
     statusRow('Безопасные исправления', summary.normalizations, summary.normalizations ? 'accent' : null) +
     statusRow('Связи со справочником', summary.matches, summary.matches ? 'accent' : null) +
+    statusRow('Возможные дубли', summary.duplicates, summary.duplicates ? 'amber' : null) +
     statusRow('Требуют внимания', summary.attention, summary.attention ? 'amber' : null) +
     statusRow('Блокирующие ошибки', summary.blocking, summary.blocking ? 'red' : null);
 
@@ -478,7 +479,11 @@ function renderReportPage() {
   const page = reportRuleIndex + 1;
   const total = reportRules.length;
   const count = rule.items.length;
-  const isMatch = rule.items[0].kind === 'match';
+  // У связей и дублей нет пары «было → станет»: показывается кандидат,
+  // уровень уверенности и признаки, по которым он найден.
+  const kind = rule.items[0].kind;
+  const isCandidate = kind === 'match' || kind === 'duplicate';
+  const targetHeader = kind === 'duplicate' ? 'Заявка-оригинал' : 'Компания справочника';
 
   document.getElementById('reportTitle').textContent = 'Изменения: ' + rule.name;
   document.getElementById('reportPageInfo').textContent = page + ' из ' + total;
@@ -492,8 +497,8 @@ function renderReportPage() {
     '<th class="col-check"><input type="checkbox" id="ruleCheckAll"' +
       ' aria-label="Подтвердить все изменения этого правила" onchange="toggleRuleActions(this)"></th>' +
     '<th class="col-app">Заявка</th>' +
-    (isMatch
-      ? '<th>Компания справочника</th><th class="col-conf">Уверенность</th><th>Совпало по</th>'
+    (isCandidate
+      ? '<th>' + targetHeader + '</th><th class="col-conf">Уверенность</th><th>Совпало по</th>'
       : '<th>Было</th><th>Стало</th>') +
     '</tr>';
 
@@ -509,7 +514,7 @@ function renderReportPage() {
         ' onchange="toggleAction(\'' + action.id + '\')"></td>' +
       '<td class="col-app" title="' + escapeHtml(action.recordId) + '">' + escapeHtml(action.recordId) + '</td>';
 
-    tr.innerHTML = isMatch
+    tr.innerHTML = isCandidate
       ? head +
         '<td class="cell-to">' + escapeHtml(action.after) + '</td>' +
         '<td class="col-conf">' + confidenceBadge(action.confidence) + '</td>' +

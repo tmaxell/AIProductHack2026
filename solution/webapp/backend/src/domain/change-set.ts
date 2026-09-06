@@ -3,15 +3,21 @@ import { runRecordChecks } from './checks.js';
 import { fingerprint } from './fingerprint.js';
 import type { IssueSeverity } from './normalize/index.js';
 import {
-  EMPTY_INDEX,
+  EMPTY_REFERENCE_DATA,
+  findDuplicate,
   matchCompany,
   toQuery,
+  type ApplicationSummary,
   type CompanyIndex,
   type Confidence,
+  type ReferenceData,
 } from './matching/index.js';
 
 /** Поле, в которое записывается ссылка на запись справочника компаний. */
 export const COMPANY_REF_FIELD = 'company_ref_id';
+
+/** Поле, в которое записывается ссылка на заявку-оригинал. */
+export const DUPLICATE_OF_FIELD = 'duplicate_of';
 
 export interface SourceRecord {
   readonly id: string;
@@ -19,7 +25,7 @@ export interface SourceRecord {
 }
 
 /** Нормализация чинит формат значения, сопоставление связывает со справочником. */
-export type ActionKind = 'normalize' | 'match';
+export type ActionKind = 'normalize' | 'match' | 'duplicate';
 
 /** Одно предлагаемое изменение одного поля одной записи. */
 export interface ChangeAction {
@@ -53,6 +59,7 @@ export interface ChangeSetSummary {
   readonly actions: number;
   readonly normalizations: number;
   readonly matches: number;
+  readonly duplicates: number;
   /** Замечания и предупреждения: требуют внимания человека. */
   readonly attention: number;
   /** Ошибки: изменение предложить нельзя. */
@@ -143,9 +150,54 @@ function matchAction(record: SourceRecord, index: CompanyIndex): {
   };
 }
 
+const DUPLICATE_RULE = {
+  code: 'duplicate_application',
+  name: 'Возможный дубль заявки',
+  reason: 'Совпали название проекта и признаки компании с уже существующей заявкой',
+  group: 'Дубли',
+} as const;
+
+function toSummary(record: SourceRecord): ApplicationSummary {
+  return {
+    id: record.id,
+    applicationId: record.values.application_id ?? '',
+    companyName: record.values.company_name ?? '',
+    companyInn: record.values.company_inn ?? '',
+    companyEmail: record.values.company_email ?? '',
+    companyPhone: record.values.company_phone ?? '',
+    projectName: record.values.project_name ?? '',
+  };
+}
+
+function duplicateAction(record: SourceRecord, references: ReferenceData): ChangeAction | null {
+  const outcome = findDuplicate(toSummary(record), references.applications);
+  if (outcome === null) return null;
+
+  const current = record.values[DUPLICATE_OF_FIELD] ?? null;
+  if (current === outcome.canonical.id) return null;
+
+  const evidence = outcome.factors.map((factor) => factor.label);
+  if (outcome.groupSize > 2) evidence.push(`всего в группе ${outcome.groupSize}`);
+
+  return {
+    kind: 'duplicate',
+    id: actionId(record.id, DUPLICATE_RULE.code),
+    recordId: record.id,
+    field: DUPLICATE_OF_FIELD,
+    ruleCode: DUPLICATE_RULE.code,
+    ruleName: DUPLICATE_RULE.name,
+    reason: DUPLICATE_RULE.reason,
+    group: DUPLICATE_RULE.group,
+    before: current,
+    after: outcome.canonical.id,
+    confidence: outcome.confidence,
+    evidence,
+  };
+}
+
 export function buildChangeSet(
   records: readonly SourceRecord[],
-  companyIndex: CompanyIndex = EMPTY_INDEX,
+  references: ReferenceData = EMPTY_REFERENCE_DATA,
   now: Date = new Date(),
 ): ChangeSet {
   const actions: ChangeAction[] = [];
@@ -207,11 +259,22 @@ export function buildChangeSet(
 
   // Сопоставление идёт после нормализации: у него отдельный смысл и отдельная
   // строка в сводке — это рекомендация связи, а не исправление формата.
-  if (companyIndex.size > 0) {
+  if (references.companies.size > 0) {
     for (const record of records) {
-      const { action, issue: found } = matchAction(record, companyIndex);
+      const { action, issue: found } = matchAction(record, references.companies);
       if (action) actions.push(action);
       if (found) issues.push(found);
+    }
+  }
+
+  const matches = actions.length - normalizations;
+
+  // Дубли ищутся по всей таблице заявок, а не только внутри выбранного набора:
+  // заявка-оригинал может не попасть в выбор пользователя.
+  if (references.applications.size > 0) {
+    for (const record of records) {
+      const action = duplicateAction(record, references);
+      if (action) actions.push(action);
     }
   }
 
@@ -227,7 +290,8 @@ export function buildChangeSet(
       records: records.length,
       actions: actions.length,
       normalizations,
-      matches: actions.length - normalizations,
+      matches,
+      duplicates: actions.length - normalizations - matches,
       attention: issues.filter((found) => found.severity !== 'error').length,
       blocking: issues.filter((found) => found.severity === 'error').length,
     },

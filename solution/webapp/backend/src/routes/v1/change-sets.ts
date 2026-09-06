@@ -30,7 +30,7 @@ function toRecordDtos(records: readonly SourceRecord[]): RecordDto[] {
 }
 
 interface ActionDto {
-  kind: 'normalize' | 'match';
+  kind: 'normalize' | 'match' | 'duplicate';
   id: string;
   recordId: string;
   field: string;
@@ -95,7 +95,7 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
         response: { 200: ChangeSetSchema, 400: ErrorResponse },
       },
     },
-    (request) => toChangeSetDto(buildChangeSet(toDomain(request.body.records), fastify.companyIndex)),
+    (request) => toChangeSetDto(buildChangeSet(toDomain(request.body.records), fastify.dataset)),
   );
 
   fastify.post(
@@ -118,7 +118,7 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
     },
     (request, reply) => {
       const records = toDomain(request.body.records);
-      const changeSet = buildChangeSet(records, fastify.companyIndex);
+      const changeSet = buildChangeSet(records, fastify.dataset);
 
       if (changeSet.sourceFingerprint !== request.body.sourceFingerprint) {
         void reply.code(409).send({

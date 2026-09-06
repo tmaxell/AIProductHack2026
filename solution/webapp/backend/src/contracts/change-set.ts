@@ -43,7 +43,7 @@ export const Confidence = Type.Union(
 export const ChangeAction = Type.Object(
   {
     id: Type.String({ description: 'Детерминированный id: <recordId>::<ruleCode>' }),
-    kind: Type.Union([Type.Literal('normalize'), Type.Literal('match')]),
+    kind: Type.Union([Type.Literal('normalize'), Type.Literal('match'), Type.Literal('duplicate')]),
     recordId: Type.String(),
     field: Type.String(),
     ruleCode: Type.String(),
@@ -66,6 +66,7 @@ export const ChangeSetSummary = Type.Object(
     actions: Type.Integer(),
     normalizations: Type.Integer({ description: 'Исправления формата значений' }),
     matches: Type.Integer({ description: 'Предложенные связи со справочником' }),
+    duplicates: Type.Integer({ description: 'Заявки, похожие на уже существующие' }),
     attention: Type.Integer({ description: 'Замечания и предупреждения' }),
     blocking: Type.Integer({ description: 'Ошибки, по которым изменение не предлагается' }),
   },
