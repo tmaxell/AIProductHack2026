@@ -128,7 +128,7 @@
         <h2 class="wp-state-title">Проверка заявок</h2>
         <p class="wp-state-sub">Найдём форматные ошибки и подготовим список изменений.</p>
         <div class="source-card">
-          <div class="source-label">Источник</div>
+          <div class="source-label" id="sourceLabel">Источник</div>
           <div class="source-row">
             <span class="source-value">дев выборка</span>
             <span class="source-count" id="sourceCount"></span>
@@ -141,6 +141,12 @@
         <h2 class="wp-state-title">Проверяем заявки</h2>
         <p class="wp-state-sub" id="loadingSub"></p>
         <div class="spinner" aria-hidden="true"></div>
+      </section>
+
+      <!-- Состояние «сервис недоступен» -->
+      <section id="widgetError" hidden>
+        <h2 class="wp-state-title">Проверка не выполнена</h2>
+        <p class="wp-state-sub" id="errorText"></p>
       </section>
 
       <!-- Состояние «после запуска» -->
@@ -175,6 +181,10 @@
         <table class="grid report-grid" aria-label="Изменения по правилу">
           <thead>
             <tr>
+              <th class="col-check">
+                <input type="checkbox" id="ruleCheckAll" aria-label="Подтвердить все изменения этого правила"
+                       onchange="toggleRuleActions(this)">
+              </th>
               <th class="col-app">Заявка</th>
               <th>Было</th>
               <th>Стало</th>
@@ -194,9 +204,10 @@
           <svg class="ic"><use href="#i-next"/></svg>
         </button>
       </div>
+      <span class="pager-selection" id="reportSelection"></span>
       <span class="spacer"></span>
       <button class="btn-ghost" onclick="closeReport()">Закрыть</button>
-      <button class="btn-primary" id="reportApplyBtn" onclick="applyFromReport()">Применить все</button>
+      <button class="btn-primary" id="reportApplyBtn" onclick="applyFromReport()">Применить</button>
     </footer>
   </div>
 </div>
@@ -204,7 +215,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="data.js"></script>
-<script src="widget-script.js"></script>
+<script src="api.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

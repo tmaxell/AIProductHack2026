@@ -3,9 +3,41 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 
+interface RecordDto {
+  id: string;
+  values: Record<string, string | null>;
+}
+
+interface ActionDto {
+  id: string;
+  recordId: string;
+  field: string;
+  before: string | null;
+  after: string | null;
+}
+
+interface ChangeSetDto {
+  id: string;
+  sourceFingerprint: string;
+  actions: ActionDto[];
+  summary: { records: number; actions: number; attention: number; blocking: number };
+}
+
+interface ApplyDto {
+  records: RecordDto[];
+  applied: ActionDto[];
+  skipped: { actionId: string; reason: string }[];
+}
+
+interface ErrorDto {
+  statusCode: number;
+  error: string;
+  message: string;
+}
+
 let app: FastifyInstance;
 
-const records = [
+const records: RecordDto[] = [
   { id: 'ROW-1', values: { company_email: 'Info @ A.example', company_city: 'Г. Сочи' } },
   { id: 'ROW-2', values: { company_email: 'ok@b.example' } },
 ];
@@ -19,111 +51,101 @@ afterAll(async () => {
   await app.close();
 });
 
-async function createChangeSet(payload = { records }) {
-  const response = await app.inject({ method: 'POST', url: '/api/v1/change-sets', payload });
-  return response;
+function create(payload: { records: RecordDto[] } = { records }) {
+  return app.inject({ method: 'POST', url: '/api/v1/change-sets', payload });
+}
+
+function apply(payload: {
+  records: RecordDto[];
+  sourceFingerprint: string;
+  actionIds: string[];
+}) {
+  return app.inject({ method: 'POST', url: '/api/v1/change-sets/apply', payload });
 }
 
 test('создание набора изменений возвращает действия и отпечаток', async () => {
-  const response = await createChangeSet();
-  const body = response.json();
+  const response = await create();
+  const body = response.json<ChangeSetDto>();
 
   expect(response.statusCode).toBe(200);
   expect(body.sourceFingerprint).toMatch(/^[0-9a-f]{64}$/);
   expect(body.summary.records).toBe(2);
-  expect(body.actions.map((a: { id: string }) => a.id)).toContain('ROW-1::company_email');
+  expect(body.actions.map((action) => action.id)).toContain('ROW-1::company_email');
 });
 
 test('пустой список записей отклоняется схемой', async () => {
-  const response = await createChangeSet({ records: [] });
-  expect(response.statusCode).toBe(400);
+  expect((await create({ records: [] })).statusCode).toBe(400);
 });
 
 test('применяется только подтверждённое действие', async () => {
-  const changeSet = (await createChangeSet()).json();
+  const changeSet = (await create()).json<ChangeSetDto>();
 
-  const response = await app.inject({
-    method: 'POST',
-    url: '/api/v1/change-sets/apply',
-    payload: {
-      records,
-      sourceFingerprint: changeSet.sourceFingerprint,
-      actionIds: ['ROW-1::company_email'],
-    },
+  const response = await apply({
+    records,
+    sourceFingerprint: changeSet.sourceFingerprint,
+    actionIds: ['ROW-1::company_email'],
   });
-  const body = response.json();
-  const row = body.records.find((r: { id: string }) => r.id === 'ROW-1');
+  const body = response.json<ApplyDto>();
+  const row = body.records.find((record) => record.id === 'ROW-1');
 
   expect(response.statusCode).toBe(200);
   expect(body.applied).toHaveLength(1);
-  expect(row.values.company_email).toBe('info@a.example');
-  expect(row.values.company_city).toBe('Г. Сочи');
+  expect(row?.values.company_email).toBe('info@a.example');
+  // Не подтверждённое действие не применяется.
+  expect(row?.values.company_city).toBe('Г. Сочи');
 });
 
 test('пустой список подтверждений ничего не меняет', async () => {
-  const changeSet = (await createChangeSet()).json();
+  const changeSet = (await create()).json<ChangeSetDto>();
 
-  const response = await app.inject({
-    method: 'POST',
-    url: '/api/v1/change-sets/apply',
-    payload: { records, sourceFingerprint: changeSet.sourceFingerprint, actionIds: [] },
+  const response = await apply({
+    records,
+    sourceFingerprint: changeSet.sourceFingerprint,
+    actionIds: [],
   });
 
   expect(response.statusCode).toBe(200);
-  expect(response.json().applied).toEqual([]);
-  expect(response.json().records).toEqual(records);
+  expect(response.json<ApplyDto>().applied).toEqual([]);
+  expect(response.json<ApplyDto>().records).toEqual(records);
 });
 
 test('изменившиеся исходные данные блокируют применение конфликтом', async () => {
-  const changeSet = (await createChangeSet()).json();
-  const stale = [{ id: 'ROW-1', values: { company_email: 'other @ A.example' } }];
+  const changeSet = (await create()).json<ChangeSetDto>();
 
-  const response = await app.inject({
-    method: 'POST',
-    url: '/api/v1/change-sets/apply',
-    payload: {
-      records: stale,
-      sourceFingerprint: changeSet.sourceFingerprint,
-      actionIds: ['ROW-1::company_email'],
-    },
+  const response = await apply({
+    records: [{ id: 'ROW-1', values: { company_email: 'other @ A.example' } }],
+    sourceFingerprint: changeSet.sourceFingerprint,
+    actionIds: ['ROW-1::company_email'],
   });
 
   expect(response.statusCode).toBe(409);
-  expect(response.json().error).toBe('Conflict');
+  expect(response.json<ErrorDto>().error).toBe('Conflict');
 });
 
 test('действие вне набора изменений отклоняется с 422', async () => {
-  const changeSet = (await createChangeSet()).json();
+  const changeSet = (await create()).json<ChangeSetDto>();
 
-  const response = await app.inject({
-    method: 'POST',
-    url: '/api/v1/change-sets/apply',
-    payload: {
-      records,
-      sourceFingerprint: changeSet.sourceFingerprint,
-      actionIds: ['ROW-1::company_email', 'ROW-9::budget'],
-    },
+  const response = await apply({
+    records,
+    sourceFingerprint: changeSet.sourceFingerprint,
+    actionIds: ['ROW-1::company_email', 'ROW-9::budget'],
   });
 
   expect(response.statusCode).toBe(422);
-  expect(response.json().message).toContain('ROW-9::budget');
+  expect(response.json<ErrorDto>().message).toContain('ROW-9::budget');
 });
 
 test('повторный полный цикл не применяет изменения второй раз', async () => {
-  const first = (await createChangeSet()).json();
+  const first = (await create()).json<ChangeSetDto>();
   const applied = (
-    await app.inject({
-      method: 'POST',
-      url: '/api/v1/change-sets/apply',
-      payload: {
-        records,
-        sourceFingerprint: first.sourceFingerprint,
-        actionIds: first.actions.map((a: { id: string }) => a.id),
-      },
+    await apply({
+      records,
+      sourceFingerprint: first.sourceFingerprint,
+      actionIds: first.actions.map((action) => action.id),
     })
-  ).json();
+  ).json<ApplyDto>();
 
-  const second = (await createChangeSet({ records: applied.records })).json();
+  const second = (await create({ records: applied.records })).json<ChangeSetDto>();
 
   expect(second.actions).toEqual([]);
   expect(second.summary.actions).toBe(0);

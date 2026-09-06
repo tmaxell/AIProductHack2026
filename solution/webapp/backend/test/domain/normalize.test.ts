@@ -50,8 +50,21 @@ describe('inn', () => {
     });
   });
 
+  // Регрессия: прежняя реализация оставляла дефис и не считала это проблемой.
+  test('дефис между цифрами убирается как разделитель', () => {
+    expect(normalizeInn('1308-807582')).toMatchObject({
+      value: '1308807582',
+      changed: true,
+      issues: [],
+    });
+  });
+
+  test('короткий ИНН помечается ошибкой длины', () => {
+    expect(codes(normalizeInn('ИНН 60-12'))).toContain('BAD_INN_LEN');
+  });
+
   test('нецифровой ИНН помечается ошибкой', () => {
-    expect(codes(normalizeInn('ИНН 60-12'))).toContain('BAD_INN');
+    expect(codes(normalizeInn('ИНН АБ-В'))).toContain('BAD_INN');
   });
 });
 

@@ -357,7 +357,11 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
   border: 1px solid var(--border); border-radius: var(--r-card);
   overflow: auto; max-height: 46vh;
 }
-table.report-grid { min-width: 640px; }
+table.report-grid { min-width: 660px; }
+/* Отклонённое действие остаётся видимым, но приглушённым. */
+table.report-grid tr.declined td { color: var(--text-muted); }
+table.report-grid tr.declined .cell-to { font-weight: 400; }
+table.report-grid tr.declined .cell-to::before { background: #C7C9D1; }
 table.report-grid .col-app { width: 150px; color: var(--text-muted); }
 table.report-grid td { max-width: 320px; }
 #reportTableBody .cell-from { color: var(--text-muted); }
@@ -369,6 +373,8 @@ table.report-grid td { max-width: 320px; }
 }
 .pager { display: flex; align-items: center; gap: 4px; }
 .pager-info { color: var(--text-muted); min-width: 58px; text-align: center; }
+.pager-selection { color: var(--text-muted); margin-left: 12px; }
+.btn-primary:disabled { background: #B9A9F7; cursor: default; }
 
 /* ============ TOAST ============ */
 .toast {

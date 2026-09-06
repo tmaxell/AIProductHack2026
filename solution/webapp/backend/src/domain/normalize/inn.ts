@@ -8,7 +8,11 @@ export function normalizeInn(raw: unknown): NormalizationResult {
     .toUpperCase()
     .replace(/^ИНН\s*/iu, '')
     .replace(/\s+/g, '')
-    .replace(/\.0$/, '');
+    .replace(/\.0$/, '')
+    // Дефис между цифрами — такой же разделитель, как пробел: «1308-807582».
+    // Прежняя реализация этот паттерн распознавала, но только чтобы не выдать
+    // ошибку — дефис оставался в значении, и невалидный ИНН проходил проверку.
+    .replace(/(?<=\d)-(?=\d)/g, '');
 
   const issues: NormalizationIssue[] = [];
   if (!/^\d{10}$|^\d{12}$/.test(value)) {

@@ -58,8 +58,11 @@ export function buildChangeSet(
   const actions: ChangeAction[] = [];
   const issues: RecordIssue[] = [];
 
-  for (const record of records) {
-    for (const rule of RULES) {
+  // Внешний цикл по правилам: действия приходят уже сгруппированными по
+  // правилу в порядке RULES, поэтому отчёт не зависит от того, какие правила
+  // сработали на первой записи.
+  for (const rule of RULES) {
+    for (const record of records) {
       const raw = record.values[rule.field];
       const result = rule.normalize(raw);
       if (result.value === null) continue;

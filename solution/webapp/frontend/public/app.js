@@ -1,29 +1,31 @@
 /* ============================================================
-   app.js — presentation layer локального mock MVP:
-   рендер таблицы, состояния виджета и отчёт «было → стало».
-   Доменная логика нормализации живёт в widget-script.js.
+   app.js — presentation layer веб-приложения.
+   Правила нормализации живут в backend: здесь только показ данных,
+   решения пользователя по отдельным действиям и вызовы API.
    ============================================================ */
 
-const records = window.MVP_DATA || [];
+const rows = window.MVP_DATA || [];
 
-let selectedRows = new Set();
+let selectedRows = new Set();   // scope проверки: пусто = все записи
 let searchQuery = '';
-let hasRun = false;          // проверка хотя бы раз выполнена
-let isRunning = false;       // проверка выполняется прямо сейчас
-let applyMode = false;       // нормализации применены к данным
-let reportRules = [];        // правила текущего отчёта
-let reportRuleIndex = 0;
+let state = 'initial';          // initial | loading | result | applied | error
+let errorText = '';
 
-// Снимок фактически применённых изменений: нужен, чтобы состояние
-// «применено» показывало реальные числа, а не результат повторной проверки.
-let appliedSnapshot = [];
-let appliedChangeCount = 0;
-let appliedRecordCount = 0;
+let changeSet = null;           // черновик от backend
+let accepted = new Set();       // подтверждённые пользователем действия
+let issuesByRecord = new Map(); // recordId → замечания текущего набора
+let checkedIds = new Set();     // записи, попавшие в последнюю проверку
+
+let lastApply = null;           // итог применения
+let snapshot = null;            // значения до применения, для отката
+
+let reportRules = [];
+let reportRuleIndex = 0;
 
 /* ---------- утилиты ---------- */
 
 function escapeHtml(s) {
-  return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 function pluralRu(n, one, few, many) {
@@ -34,8 +36,8 @@ function pluralRu(n, one, few, many) {
   return many;
 }
 
-function recordsWord(n) { return pluralRu(n, 'запись', 'записи', 'записей'); }
-function changesWord(n) { return pluralRu(n, 'изменение', 'изменения', 'изменений'); }
+const recordsWord = (n) => pluralRu(n, 'запись', 'записи', 'записей');
+const changesWord = (n) => pluralRu(n, 'изменение', 'изменения', 'изменений');
 
 let toastTimer = null;
 function showToast(text) {
@@ -48,7 +50,34 @@ function showToast(text) {
   toastTimer = setTimeout(() => {
     el.classList.remove('show');
     setTimeout(() => { el.hidden = true; }, 200);
-  }, 3200);
+  }, 3600);
+}
+
+/* ---------- scope и DTO ---------- */
+
+function scopeRecords() {
+  return selectedRows.size ? rows.filter((row) => selectedRows.has(row.row_id)) : rows;
+}
+
+/* Служебные поля представления наружу не отправляются. Список полей backend
+   определяет сам — фронтенд не повторяет серверные правила. */
+function toDto(row) {
+  const values = {};
+  Object.keys(row).forEach((key) => {
+    if (key.startsWith('_') || key === 'row_id') return;
+    const value = row[key];
+    values[key] = value === undefined || value === null ? null : String(value);
+  });
+  return { id: row.row_id, values };
+}
+
+function mergeBack(updated) {
+  const byId = new Map(rows.map((row) => [row.row_id, row]));
+  updated.forEach((record) => {
+    const row = byId.get(record.id);
+    if (!row) return;
+    Object.keys(record.values).forEach((field) => { row[field] = record.values[field]; });
+  });
 }
 
 /* ---------- таблица ---------- */
@@ -61,13 +90,12 @@ function statusData(statusRaw) {
   return { label: statusRaw || '—', cls: 'b-info' };
 }
 
-/* Единая колонка «Проверка»: до запуска — нейтральное «Не проверено». */
 function checkInfo(row) {
-  if (!hasRun) return { label: 'Не проверено', cls: 'b-neutral' };
-  const issues = row._validationIssues || [];
-  const err = issues.filter(i => i.type === 'error').length;
-  const warn = issues.filter(i => i.type === 'warn').length;
-  const info = issues.filter(i => i.type === 'info').length;
+  if (!checkedIds.has(row.row_id)) return { label: 'Не проверено', cls: 'b-neutral' };
+  const issues = issuesByRecord.get(row.row_id) || [];
+  const err = issues.filter((i) => i.severity === 'error').length;
+  const warn = issues.filter((i) => i.severity === 'warning').length;
+  const info = issues.filter((i) => i.severity === 'info').length;
   if (err) return { label: err + ' ' + pluralRu(err, 'ошибка', 'ошибки', 'ошибок'), cls: 'b-error' };
   if (warn) return { label: warn + ' ' + pluralRu(warn, 'предупреждение', 'предупреждения', 'предупреждений'), cls: 'b-review' };
   if (info) return { label: info + ' ' + pluralRu(info, 'замечание', 'замечания', 'замечаний'), cls: 'b-info' };
@@ -75,10 +103,10 @@ function checkInfo(row) {
 }
 
 function visibleRecords() {
-  if (!searchQuery) return records;
-  const s = searchQuery.toLowerCase();
-  return records.filter(r => [r.project_name, r.company_name, r.company_city, r.company_inn, r.application_id, r.requester_email]
-    .some(v => String(v || '').toLowerCase().includes(s)));
+  if (!searchQuery) return rows;
+  const q = searchQuery.toLowerCase();
+  return rows.filter((r) => [r.project_name, r.company_name, r.company_city, r.company_inn, r.application_id, r.requester_email]
+    .some((v) => String(v || '').toLowerCase().includes(q)));
 }
 
 function renderTable() {
@@ -91,8 +119,8 @@ function renderTable() {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     tr.innerHTML = '<td colspan="10">' +
-      (records.length ? 'По запросу «' + escapeHtml(searchQuery) + '» ничего не найдено'
-                      : 'В представлении нет записей') + '</td>';
+      (rows.length ? 'По запросу «' + escapeHtml(searchQuery) + '» ничего не найдено'
+                   : 'В представлении нет записей') + '</td>';
     tbody.appendChild(tr);
     document.getElementById('rowCount').textContent = '0 записей';
     return;
@@ -101,8 +129,9 @@ function renderTable() {
   list.forEach((row, idx) => {
     const st = statusData(row.status);
     const chk = checkInfo(row);
+    const issues = issuesByRecord.get(row.row_id) || [];
     const tr = document.createElement('tr');
-    if (hasRun && row._validationError) tr.classList.add('flagged');
+    if (issues.some((i) => i.severity === 'error')) tr.classList.add('flagged');
     if (selectedRows.has(row.row_id)) tr.classList.add('selected');
     tr.innerHTML =
       '<td class="col-check"><input type="checkbox" aria-label="Выбрать заявку ' + escapeHtml(row.application_id) + '" ' +
@@ -126,11 +155,13 @@ function toggleRow(e, id) {
   if (selectedRows.has(id)) selectedRows.delete(id);
   else selectedRows.add(id);
   renderTable();
+  renderWidget();
 }
 
 function toggleAll(cb) {
-  visibleRecords().forEach(r => { if (cb.checked) selectedRows.add(r.row_id); else selectedRows.delete(r.row_id); });
+  visibleRecords().forEach((r) => { if (cb.checked) selectedRows.add(r.row_id); else selectedRows.delete(r.row_id); });
   renderTable();
+  renderWidget();
 }
 
 function onSearch(q) {
@@ -146,11 +177,10 @@ function toggleWidget() {
   const collapsed = panel.classList.toggle('collapsed');
   panel.hidden = collapsed;
   reopen.hidden = !collapsed;
-  if (!collapsed) panel.querySelector('.wp-header .icon-btn').focus();
-  else reopen.focus();
+  if (collapsed) reopen.focus();
+  else panel.querySelector('.wp-header .icon-btn').focus();
 }
 
-/* Настройка нижней панели действий: не более одной primary-кнопки. */
 function setActions(primary, secondary) {
   const p = document.getElementById('primaryBtn');
   const s = document.getElementById('secondaryBtn');
@@ -178,214 +208,203 @@ function setActions(primary, secondary) {
   }
 }
 
-/* ---------- проверка ---------- */
-
-// validateRow агрегирует issues из полей самой строки и не очищает их,
-// поэтому перед повторным запуском сбрасываем результат прошлой проверки.
-const ISSUE_KEYS = ['_issuesEmail', '_issuesPhone', '_issuesInn', '_issuesCity',
-  '_issuesFio', '_issuesBudget', '_issuesStart', '_issuesEnd', '_issuesDates'];
-
-function validateAll() {
-  records.forEach(row => {
-    ISSUE_KEYS.forEach(k => { delete row[k]; });
-    const res = window.LPC.validateRow(row);
-    row._validationOk = res.ok;
-    row._validationError = res.hasError;
-    row._validationIssues = res.issues;
-    row._validationChanges = res.changes;
-  });
-}
-
-/* Метаданные правил валидации — порядок совпадает с порядком страниц отчёта. */
-const RULE_META = [
-  { key: 'company_email', field: 'company_email', name: 'Email компании', reason: 'Приведение email к нижнему регистру и удаление пробелов', group: 'Контакты' },
-  { key: 'company_phone', field: 'company_phone', name: 'Телефон компании', reason: 'Приведение телефона к единому формату', group: 'Контакты' },
-  { key: 'company_inn', field: 'company_inn', name: 'ИНН компании', reason: 'Удаление префикса «ИНН» и пробелов', group: 'Реквизиты' },
-  { key: 'company_city', field: 'company_city', name: 'Город', reason: 'Нормализация названия города и транслитерация', group: 'География' },
-  { key: 'requester_fio', field: 'requester_fio', name: 'ФИО заявителя', reason: 'Приведение ФИО к единому регистру', group: 'Контакты' },
-  { key: 'budget', field: 'budget', name: 'Бюджет', reason: 'Очистка валюты и приведение к числовому виду', group: 'Финансы' },
-  { key: 'planned_start', field: 'planned_start', name: 'Дата начала', reason: 'Приведение даты к формату ГГГГ-ММ-ДД', group: 'Сроки' },
-  { key: 'planned_end', field: 'planned_end', name: 'Дата окончания', reason: 'Приведение даты к формату ГГГГ-ММ-ДД', group: 'Сроки' }
-];
-
-function collectRuleChanges() {
-  const ruleMap = {};
-  RULE_META.forEach(r => { ruleMap[r.key] = { meta: r, items: [] }; });
-
-  records.forEach(row => {
-    (row._validationChanges || []).forEach(c => {
-      const meta = RULE_META.find(r => r.field === c.field);
-      if (!meta) return;
-      ruleMap[meta.key].items.push({
-        row_id: row.row_id,
-        application_id: row.application_id,
-        field: c.field,
-        from: c.from,
-        to: c.to
-      });
-    });
-  });
-
-  return RULE_META.map(r => ruleMap[r.key]).filter(r => r.items.length > 0);
-}
-
-function computeSummary() {
-  const issues = records.reduce((acc, r) => acc.concat(r._validationIssues || []), []);
-  return {
-    total: records.length,
-    changes: records.reduce((a, r) => a + (r._validationChanges || []).length, 0),
-    attention: issues.filter(i => i.type !== 'error').length,
-    blocking: issues.filter(i => i.type === 'error').length
-  };
-}
-
 function statusRow(label, value, tone) {
   return '<div class="status-row' + (tone ? ' tone-' + tone : '') + '">' +
     '<span class="sr-label">' + escapeHtml(label) + '</span>' +
     '<span class="sr-value">' + value + '</span></div>';
 }
 
-function ruleList(rules) {
-  if (!rules.length) return '';
-  return '<div class="rule-list">' + rules.map(r =>
-    '<div class="rule-row"><span class="rr-name">' + escapeHtml(r.meta.name) + '</span>' +
-    '<span class="rr-count">' + r.items.length + '</span></div>').join('') + '</div>';
+function ruleList(entries) {
+  if (!entries.length) return '';
+  return '<div class="rule-list">' + entries.map((entry) =>
+    '<div class="rule-row"><span class="rr-name">' + escapeHtml(entry.name) + '</span>' +
+    '<span class="rr-count">' + entry.count + '</span></div>').join('') + '</div>';
+}
+
+function groupActions(actions) {
+  const order = [];
+  const byRule = new Map();
+  actions.forEach((action) => {
+    if (!byRule.has(action.ruleCode)) {
+      byRule.set(action.ruleCode, { code: action.ruleCode, name: action.ruleName, reason: action.reason, items: [] });
+      order.push(action.ruleCode);
+    }
+    byRule.get(action.ruleCode).items.push(action);
+  });
+  return order.map((code) => byRule.get(code));
 }
 
 /* ---------- состояния виджета ---------- */
 
-function renderWidget() {
-  const intro = document.getElementById('widgetIntro');
-  const loading = document.getElementById('widgetLoading');
-  const result = document.getElementById('validationSection');
+const SECTIONS = ['widgetIntro', 'widgetLoading', 'widgetError', 'validationSection'];
 
-  if (isRunning) {
-    intro.hidden = true;
-    loading.hidden = false;
-    result.hidden = true;
-    document.getElementById('loadingSub').textContent =
-      'Обрабатываем ' + records.length + ' ' + recordsWord(records.length) + '.';
+function showSection(id) {
+  SECTIONS.forEach((key) => { document.getElementById(key).hidden = key !== id; });
+}
+
+function renderWidget() {
+  if (state === 'loading') {
+    showSection('widgetLoading');
+    const n = scopeRecords().length;
+    document.getElementById('loadingSub').textContent = 'Обрабатываем ' + n + ' ' + recordsWord(n) + '.';
     setActions({ label: 'Проверяем…', disabled: true }, null);
     return;
   }
 
-  if (!hasRun) {
-    intro.hidden = false;
-    loading.hidden = true;
-    result.hidden = true;
-    document.getElementById('sourceCount').textContent = records.length + ' ' + recordsWord(records.length);
+  if (state === 'error') {
+    showSection('widgetError');
+    document.getElementById('errorText').textContent = errorText;
+    setActions({ label: 'Повторить', onClick: runCheck }, null);
+    return;
+  }
+
+  if (state === 'initial') {
+    showSection('widgetIntro');
+    const n = scopeRecords().length;
+    document.getElementById('sourceLabel').textContent = selectedRows.size ? 'Выбранные записи' : 'Источник';
+    document.getElementById('sourceCount').textContent = n + ' ' + recordsWord(n);
     setActions(
-      { label: 'Проверить данные', onClick: runValidation, disabled: !records.length },
-      { label: 'Настройки проверки', disabled: true, title: 'Экран настроек появится на следующей итерации' }
+      { label: 'Проверить данные', onClick: runCheck, disabled: !n },
+      { label: 'Настройки проверки', disabled: true, title: 'Экран настроек появится на следующей итерации' },
     );
     return;
   }
 
-  intro.hidden = true;
-  loading.hidden = true;
-  result.hidden = false;
-
+  showSection('validationSection');
   const title = document.getElementById('resultTitle');
   const sub = document.getElementById('resultSub');
-  const rows = document.getElementById('statusRows');
+  const body = document.getElementById('statusRows');
 
-  if (applyMode) {
+  if (state === 'applied') {
+    const appliedCount = lastApply.applied.length;
+    const touched = new Set(lastApply.applied.map((a) => a.recordId)).size;
     title.textContent = 'Изменения применены';
-    sub.textContent = appliedChangeCount + ' ' + changesWord(appliedChangeCount) + ' в ' +
-      appliedRecordCount + ' ' + pluralRu(appliedRecordCount, 'записи', 'записях', 'записях');
-    rows.innerHTML = '<div class="block-label">Что изменено</div>' + ruleList(appliedSnapshot);
-    setActions(null, { label: 'Отменить изменения', variant: 'ghost', onClick: resetNormalizations });
+    sub.textContent = appliedCount + ' ' + changesWord(appliedCount) + ' в ' +
+      touched + ' ' + pluralRu(touched, 'записи', 'записях', 'записях');
+
+    const groups = groupActions(lastApply.applied).map((g) => ({ name: g.name, count: g.items.length }));
+    let html = '<div class="block-label">Что изменено</div>' + ruleList(groups);
+    if (lastApply.skipped.length) {
+      html += '<div class="block-label">Пропущено: ' + lastApply.skipped.length +
+        ' — значение уже совпадало с целевым</div>';
+    }
+    if (changeSet && changeSet.actions.length === 0) {
+      html += '<div class="block-label">Повторная проверка не нашла новых изменений</div>';
+    }
+    body.innerHTML = html;
+    setActions(null, { label: 'Отменить изменения', variant: 'ghost', onClick: undoApply });
     return;
   }
 
-  const s = computeSummary();
+  const summary = changeSet.summary;
   title.textContent = 'Проверка завершена';
-  sub.textContent = s.total + ' ' + recordsWord(s.total) + ' · ' +
-    s.changes + ' ' + pluralRu(s.changes, 'предложение', 'предложения', 'предложений');
-  rows.innerHTML =
-    statusRow('Безопасные исправления', s.changes, s.changes ? 'accent' : null) +
-    statusRow('Требуют внимания', s.attention, s.attention ? 'amber' : null) +
-    statusRow('Блокирующие ошибки', s.blocking, s.blocking ? 'red' : null);
+  sub.textContent = summary.records + ' ' + recordsWord(summary.records) + ' · ' +
+    summary.actions + ' ' + pluralRu(summary.actions, 'предложение', 'предложения', 'предложений');
 
-  if (s.changes) {
+  let html =
+    statusRow('Безопасные исправления', summary.actions, summary.actions ? 'accent' : null) +
+    statusRow('Требуют внимания', summary.attention, summary.attention ? 'amber' : null) +
+    statusRow('Блокирующие ошибки', summary.blocking, summary.blocking ? 'red' : null);
+
+  if (summary.actions) {
+    html += '<div class="block-label">Подтверждено ' + accepted.size + ' из ' + summary.actions + '</div>';
+  }
+  body.innerHTML = html;
+
+  if (summary.actions) {
     setActions(
       { label: 'Посмотреть изменения', onClick: openReport },
-      { label: 'Проверить снова', onClick: runValidation }
+      { label: 'Проверить снова', onClick: runCheck },
     );
   } else {
-    setActions({ label: 'Проверить снова', onClick: runValidation }, null);
+    setActions({ label: 'Проверить снова', onClick: runCheck }, null);
   }
 }
 
-/* Проверка синхронная и быстрая; короткая задержка нужна только чтобы
-   состояние «выполняется» успело отрисоваться и не мигало. */
-const RUN_MIN_MS = 400;
+/* ---------- сценарии ---------- */
 
-function runValidation() {
-  if (isRunning) return;
-  isRunning = true;
-  renderWidget();
-  setTimeout(() => {
-    applyMode = false;
-    hasRun = true;
-    validateAll();
-    reportRules = collectRuleChanges();
-    isRunning = false;
-    renderTable();
-    renderWidget();
-  }, RUN_MIN_MS);
+function indexIssues() {
+  issuesByRecord = new Map();
+  (changeSet ? changeSet.issues : []).forEach((issue) => {
+    const bucket = issuesByRecord.get(issue.recordId) || [];
+    bucket.push(issue);
+    issuesByRecord.set(issue.recordId, bucket);
+  });
 }
 
-/* ---------- применение и откат ---------- */
+async function runCheck() {
+  const scope = scopeRecords();
+  if (!scope.length) return;
 
-function applyNormalizations() {
-  appliedSnapshot = collectRuleChanges();
-  const touched = new Set();
-  let applied = 0;
+  state = 'loading';
+  renderWidget();
 
-  records.forEach(row => {
-    (row._validationChanges || []).forEach(c => {
-      if (row[c.field] === c.to) return;
-      row._prevValues = row._prevValues || {};
-      if (!(c.field in row._prevValues)) row._prevValues[c.field] = c.from;
-      row[c.field] = c.to;
-      touched.add(row.row_id);
-      applied++;
-    });
-  });
+  try {
+    changeSet = await window.API.createChangeSet(scope.map(toDto));
+    accepted = new Set(changeSet.actions.map((a) => a.id));
+    checkedIds = new Set(scope.map((r) => r.row_id));
+    lastApply = null;
+    indexIssues();
+    state = 'result';
+  } catch (error) {
+    errorText = error.message;
+    state = 'error';
+  }
 
-  appliedChangeCount = applied;
-  appliedRecordCount = touched.size;
-  applyMode = true;
-
-  // Пересчёт после применения показывает, что повторный запуск идемпотентен.
-  validateAll();
-  reportRules = appliedSnapshot;
   renderTable();
   renderWidget();
-  showToast('Применено ' + applied + ' ' + changesWord(applied) + ' в ' + touched.size + ' ' + recordsWord(touched.size));
 }
 
-function resetNormalizations() {
-  records.forEach(row => {
-    if (!row._prevValues) return;
-    Object.keys(row._prevValues).forEach(f => { row[f] = row._prevValues[f]; });
-    delete row._prevValues;
-  });
-  applyMode = false;
-  appliedSnapshot = [];
-  appliedChangeCount = 0;
-  appliedRecordCount = 0;
-  validateAll();
-  reportRules = collectRuleChanges();
+async function applySelected() {
+  if (!changeSet || !accepted.size) return;
+  const scope = scopeRecords();
+
+  state = 'loading';
+  renderWidget();
+
+  try {
+    snapshot = scope.map((row) => ({ id: row.row_id, values: toDto(row).values }));
+    const result = await window.API.applyChangeSet(
+      scope.map(toDto), changeSet.sourceFingerprint, [...accepted],
+    );
+    mergeBack(result.records);
+    lastApply = result;
+
+    // Повторный расчёт на применённых данных: показывает, что сценарий идемпотентен.
+    changeSet = await window.API.createChangeSet(scopeRecords().map(toDto));
+    accepted = new Set(changeSet.actions.map((a) => a.id));
+    indexIssues();
+    state = 'applied';
+    showToast('Применено ' + result.applied.length + ' ' + changesWord(result.applied.length));
+  } catch (error) {
+    errorText = error.status === 409
+      ? 'Данные изменились после проверки. Запустите проверку заново.'
+      : error.message;
+    state = 'error';
+  }
+
+  renderTable();
+  renderWidget();
+}
+
+function undoApply() {
+  if (snapshot) mergeBack(snapshot);
+  snapshot = null;
+  lastApply = null;
+  changeSet = null;
+  accepted = new Set();
+  checkedIds = new Set();
+  issuesByRecord = new Map();
+  state = 'initial';
   renderTable();
   renderWidget();
   showToast('Изменения отменены, значения возвращены к исходным');
 }
 
-/* ---------- отчёт «было → стало» ---------- */
+/* ---------- отчёт и решения по действиям ---------- */
 
 function openReport() {
+  reportRules = groupActions(changeSet.actions);
   if (!reportRules.length) return;
   reportRuleIndex = 0;
   document.getElementById('reportModal').classList.add('show');
@@ -395,6 +414,7 @@ function openReport() {
 
 function closeReport() {
   document.getElementById('reportModal').classList.remove('show');
+  renderWidget();
   const primary = document.getElementById('primaryBtn');
   const secondary = document.getElementById('secondaryBtn');
   if (!primary.hidden) primary.focus();
@@ -405,63 +425,89 @@ function isReportOpen() {
   return document.getElementById('reportModal').classList.contains('show');
 }
 
+function toggleAction(id) {
+  if (accepted.has(id)) accepted.delete(id);
+  else accepted.add(id);
+  renderReportFooter();
+  renderRuleCheckAll();
+}
+
+function toggleRuleActions(cb) {
+  const rule = reportRules[reportRuleIndex];
+  rule.items.forEach((action) => {
+    if (cb.checked) accepted.add(action.id);
+    else accepted.delete(action.id);
+  });
+  renderReportPage();
+}
+
+function renderRuleCheckAll() {
+  const rule = reportRules[reportRuleIndex];
+  const total = rule.items.length;
+  const on = rule.items.filter((a) => accepted.has(a.id)).length;
+  const cb = document.getElementById('ruleCheckAll');
+  cb.checked = on === total;
+  cb.indeterminate = on > 0 && on < total;
+}
+
+function renderReportFooter() {
+  const total = changeSet.actions.length;
+  document.getElementById('reportSelection').textContent =
+    'Подтверждено ' + accepted.size + ' из ' + total;
+  const btn = document.getElementById('reportApplyBtn');
+  btn.textContent = accepted.size ? 'Применить ' + accepted.size : 'Применить';
+  btn.disabled = accepted.size === 0;
+}
+
 function renderReportPage() {
-  const rules = reportRules;
-  if (!rules.length) return;
-  const rule = rules[reportRuleIndex];
-  const meta = rule.meta;
+  const rule = reportRules[reportRuleIndex];
+  if (!rule) return;
   const page = reportRuleIndex + 1;
-  const total = rules.length;
+  const total = reportRules.length;
   const count = rule.items.length;
 
-  document.getElementById('reportTitle').textContent = 'Изменения: ' + meta.name;
+  document.getElementById('reportTitle').textContent = 'Изменения: ' + rule.name;
   document.getElementById('reportPageInfo').textContent = page + ' из ' + total;
   document.getElementById('reportRuleBody').innerHTML =
-    '<p class="report-reason">' + escapeHtml(meta.reason) + '</p>' +
+    '<p class="report-reason">' + escapeHtml(rule.reason) + '</p>' +
     '<p class="report-count">' + count + ' ' + recordsWord(count) + '</p>';
 
   const tbody = document.getElementById('reportTableBody');
   tbody.innerHTML = '';
-  rule.items.forEach(ch => {
+  rule.items.forEach((action) => {
     const tr = document.createElement('tr');
+    if (!accepted.has(action.id)) tr.classList.add('declined');
     tr.innerHTML =
-      '<td class="col-app" title="' + escapeHtml(ch.application_id || ch.row_id) + '">' + escapeHtml(ch.application_id || ch.row_id) + '</td>' +
-      '<td class="cell-from" title="' + escapeHtml(ch.from) + '">' + escapeHtml(ch.from || '—') + '</td>' +
-      '<td class="cell-to" title="' + escapeHtml(ch.to) + '">' + escapeHtml(ch.to || '—') + '</td>';
+      '<td class="col-check"><input type="checkbox" ' + (accepted.has(action.id) ? 'checked' : '') +
+        ' aria-label="Подтвердить изменение поля ' + escapeHtml(action.field) + ' для заявки ' + escapeHtml(action.recordId) + '"' +
+        ' onchange="toggleAction(\'' + action.id + '\')"></td>' +
+      '<td class="col-app" title="' + escapeHtml(action.recordId) + '">' + escapeHtml(action.recordId) + '</td>' +
+      '<td class="cell-from" title="' + escapeHtml(action.before) + '">' + escapeHtml(action.before || '—') + '</td>' +
+      '<td class="cell-to" title="' + escapeHtml(action.after) + '">' + escapeHtml(action.after || '—') + '</td>';
     tbody.appendChild(tr);
   });
 
   document.getElementById('reportPrev').disabled = page <= 1;
   document.getElementById('reportNext').disabled = page >= total;
-
-  const applyBtn = document.getElementById('reportApplyBtn');
-  const totalChanges = rules.reduce((a, r) => a + r.items.length, 0);
-  applyBtn.hidden = applyMode;
-  applyBtn.textContent = 'Применить все ' + totalChanges;
+  renderRuleCheckAll();
+  renderReportFooter();
 }
 
 function reportPrev() { if (reportRuleIndex > 0) { reportRuleIndex--; renderReportPage(); } }
 function reportNext() { if (reportRuleIndex < reportRules.length - 1) { reportRuleIndex++; renderReportPage(); } }
 
 function applyFromReport() {
-  closeReport();
-  applyNormalizations();
+  document.getElementById('reportModal').classList.remove('show');
+  applySelected();
 }
 
 /* ---------- инициализация ---------- */
 
-document.addEventListener('DOMContentLoaded', () => {
-  records.forEach(r => { r._validationIssues = []; r._validationChanges = []; });
-  renderTable();
-  renderWidget();
-});
-
-/* Модалка удерживает фокус, пока открыта. */
 const FOCUSABLE = 'button:not([disabled]):not([hidden]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function trapFocus(e) {
   const modal = document.querySelector('#reportModal .modal');
-  const items = Array.from(modal.querySelectorAll(FOCUSABLE)).filter(el => el.offsetParent !== null);
+  const items = Array.from(modal.querySelectorAll(FOCUSABLE)).filter((el) => el.offsetParent !== null);
   if (!items.length) return;
   const first = items[0];
   const last = items[items.length - 1];
@@ -477,7 +523,12 @@ function trapFocus(e) {
   }
 }
 
-document.addEventListener('keydown', e => {
+document.addEventListener('DOMContentLoaded', () => {
+  renderTable();
+  renderWidget();
+});
+
+document.addEventListener('keydown', (e) => {
   if (!isReportOpen()) return;
   if (e.key === 'Escape') closeReport();
   else if (e.key === 'Tab') trapFocus(e);
