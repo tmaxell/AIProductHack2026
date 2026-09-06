@@ -1,4 +1,5 @@
 import { RULES } from './rules.js';
+import { runRecordChecks } from './checks.js';
 import { fingerprint } from './fingerprint.js';
 import type { IssueSeverity } from './normalize/index.js';
 import {
@@ -149,6 +150,9 @@ export function buildChangeSet(
 ): ChangeSet {
   const actions: ChangeAction[] = [];
   const issues: RecordIssue[] = [];
+  // Нормализованные значения нужны межполевым проверкам: сравнивать
+  // «06.02.27» и «2027-02-19» напрямую нельзя.
+  const normalized = new Map<string, Record<string, string | null>>();
 
   // Внешний цикл по правилам: действия приходят уже сгруппированными по
   // правилу в порядке RULES, поэтому отчёт не зависит от того, какие правила
@@ -158,6 +162,13 @@ export function buildChangeSet(
       const raw = record.values[rule.field];
       const result = rule.normalize(raw);
       if (result.value === null) continue;
+
+      const bucket = normalized.get(record.id) ?? {};
+      // Значение, которое встанет в поле, если предложение принять.
+      bucket[rule.field] = result.issues.some((found) => found.severity === 'error')
+        ? null
+        : result.value;
+      normalized.set(record.id, bucket);
 
       for (const found of result.issues) {
         issues.push({
@@ -183,6 +194,12 @@ export function buildChangeSet(
         before: raw ?? null,
         after: result.value,
       });
+    }
+  }
+
+  for (const record of records) {
+    for (const found of runRecordChecks(normalized.get(record.id) ?? {})) {
+      issues.push({ recordId: record.id, ...found });
     }
   }
 
