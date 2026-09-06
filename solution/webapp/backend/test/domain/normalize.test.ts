@@ -28,6 +28,22 @@ describe('email', () => {
     expect(codes(normalizeEmail('не-почта'))).toContain('INVALID_EMAIL');
   });
 
+  test.each([
+    '.info@example.com',
+    'info.@example.com',
+    'in..fo@example.com',
+    'info@-example.com',
+    'info@example-.com',
+    'info@example..com',
+    'info@@example.com',
+  ])('отклоняет структурно некорректный адрес: %s', (raw) => {
+    expect(codes(normalizeEmail(raw))).toContain('INVALID_EMAIL');
+  });
+
+  test('отклоняет слишком длинную локальную часть', () => {
+    expect(codes(normalizeEmail(`${'a'.repeat(65)}@example.com`))).toContain('INVALID_EMAIL');
+  });
+
   test('пустое значение не даёт предложения', () => {
     expect(normalizeEmail('   ')).toMatchObject({ value: null, changed: false });
   });
