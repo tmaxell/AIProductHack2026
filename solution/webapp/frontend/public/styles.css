@@ -332,7 +332,6 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .btn-primary:disabled { background: #B9A9F7; cursor: default; }
 
 /* ============ ВЕРСИИ CHANGE SET ============ */
-.modal-versions { width: min(1120px, 96vw); height: min(760px, 90vh); }
 .versions-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); flex: 1; min-height: 0; }
 .versions-list { overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); background: var(--bg-work); }
 .version-item {
@@ -396,6 +395,7 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .copilot-details ul { padding-left: 18px; }
 .copilot-result-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .copilot-followups, .copilot-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.copilot-scope { margin-top: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 .copilot-followups button, .copilot-suggestions button { border: 1px solid #D9D0FA; border-radius: 999px; background: #F7F4FF; color: var(--purple-text); padding: 5px 9px; font: inherit; font-size: 11px; cursor: pointer; }
 .copilot-suggestions { padding: 0 14px 10px; margin-top: 0; }
 .copilot-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--bg); }
@@ -457,9 +457,12 @@ table.launch-tasks td { height: 30px; white-space: normal; max-width: none; }
   display: none; align-items: center; justify-content: center;
 }
 .modal-overlay.show { display: flex; }
+/* Все модалки одного размера: иначе окно прыгает при переходе между отчётом,
+   версиями, настройками и итоговым отчётом, и меняет высоту на каждой странице
+   правила. Содержимое скроллится внутри .m-body. */
 .modal {
   background: var(--bg); border-radius: var(--r-modal);
-  width: 820px; max-width: 94vw; max-height: 88vh;
+  width: min(1120px, 96vw); height: min(760px, 90vh);
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .2);
 }
@@ -483,6 +486,10 @@ table.launch-tasks td { height: 30px; white-space: normal; max-width: none; }
   border: 1px solid var(--border); border-radius: var(--r-card);
   overflow: auto; max-height: 46vh;
 }
+/* В окне фиксированной высоты таблица занимает всё оставшееся место, а
+   заголовок правила и футер остаются на виду. */
+#reportModal .m-body { display: flex; flex-direction: column; }
+#reportModal .report-table-wrap { flex: 1; min-height: 0; max-height: none; }
 table.report-grid { min-width: 660px; }
 /* Отклонённое действие остаётся видимым, но приглушённым. */
 table.report-grid tr.declined td { color: var(--text-muted); }

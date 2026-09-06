@@ -187,16 +187,23 @@
       <div class="copilot-messages" id="copilotMessages" aria-live="polite">
         <article class="copilot-message assistant">
           <b>Чем помочь?</b>
-          <p>Запустите проверку или откройте версию — я объясню результаты всей выгрузки и подготовлю следующие шаги.</p>
+          <p>Запустите проверку или откройте версию — я объясню, что предлагается изменить и на чём это основано.</p>
+          <p class="copilot-scope"><b>Вижу:</b> состав и основания предложенных изменений, уровни уверенности,
+            сопоставления со справочником, дубли и ваши решения по действиям.</p>
+          <p class="copilot-scope"><b>Не вижу:</b> исходные строки целиком — контакты и ФИО маскируются.
+            Применить или опубликовать что-либо не могу.</p>
         </article>
       </div>
       <div class="copilot-suggestions">
-        <button type="button" onclick="askCopilot('Объясни основные проблемы и их масштаб')">Основные проблемы</button>
-        <button type="button" onclick="askCopilot('Покажи рискованные изменения и конфликты')">Риски</button>
-        <button type="button" onclick="askCopilot('Что нужно сделать перед публикацией?')">Перед публикацией</button>
+        <button type="button" onclick="askCopilot('Объясни простым языком, что здесь предлагается изменить и почему')">Что здесь меняется</button>
+        <button type="button" onclick="askCopilot('Какие изменения самые рискованные и почему? На что смотреть в первую очередь?')">Самое рискованное</button>
+        <button type="button" onclick="askCopilot('Каким сопоставлениям с компанией из справочника стоит не доверять и почему?')">Сомнительные сопоставления</button>
+        <button type="button" onclick="askCopilot('Что не так с найденными дублями заявок? Какие из них похожи на ложные?')">Дубли</button>
+        <button type="button" onclick="askCopilot('Что проверить вручную перед публикацией этой версии?')">Перед публикацией</button>
+        <button type="button" onclick="askCopilot('Какие правила дали больше всего изменений и о чём это говорит о качестве данных?')">Качество данных</button>
       </div>
       <form class="copilot-compose" onsubmit="submitCopilot(event)">
-        <textarea id="copilotInput" rows="2" maxlength="500" placeholder="Спросить о данных и изменениях…" aria-label="Сообщение AI Copilot"></textarea>
+        <textarea id="copilotInput" rows="2" maxlength="500" placeholder="Например: почему предложено связать заявку с этой компанией?" aria-label="Сообщение AI Copilot"></textarea>
         <button class="btn-primary" id="copilotSend" type="submit">Отправить</button>
       </form>
     </section>
@@ -207,7 +214,7 @@
 
 <!-- ============ REPORT MODAL ============ -->
 <div class="modal-overlay" id="reportModal">
-  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
     <header class="m-head">
       <h2 class="m-title" id="reportTitle">Изменения</h2>
       <button class="icon-btn" onclick="closeReport()" aria-label="Закрыть отчёт">
@@ -269,7 +276,7 @@
 
 <!-- ============ LAUNCH REPORT MODAL (Milestones 8-10: задачи, исполнители, итог) ============ -->
 <div class="modal-overlay" id="launchModal">
-  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="launchTitle">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="launchTitle">
     <header class="m-head">
       <h2 class="m-title" id="launchTitle">Итоговый отчёт запуска</h2>
       <button class="icon-btn" onclick="closeLaunchReport()" aria-label="Закрыть отчёт">
