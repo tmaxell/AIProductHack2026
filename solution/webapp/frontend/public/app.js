@@ -118,7 +118,7 @@ function renderTable() {
   if (!list.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    tr.innerHTML = '<td colspan="10">' +
+    tr.innerHTML = '<td colspan="11">' +
       (rows.length ? 'По запросу «' + escapeHtml(searchQuery) + '» ничего не найдено'
                    : 'В представлении нет записей') + '</td>';
     tbody.appendChild(tr);
@@ -144,6 +144,7 @@ function renderTable() {
       '<td>' + escapeHtml(row.planned_start) + '</td>' +
       '<td>' + escapeHtml(row.planned_end) + '</td>' +
       '<td><span class="badge ' + st.cls + '"><span class="dot"></span>' + escapeHtml(st.label) + '</span></td>' +
+      '<td class="col-ref">' + (row.company_ref_id ? escapeHtml(row.company_ref_id) : '<span class="muted">—</span>') + '</td>' +
       '<td><span class="badge ' + chk.cls + '"><span class="dot"></span>' + escapeHtml(chk.label) + '</span></td>';
     tbody.appendChild(tr);
   });
@@ -206,6 +207,17 @@ function setActions(primary, secondary) {
     s.hidden = true;
     s.onclick = null;
   }
+}
+
+const CONFIDENCE = {
+  high: { label: 'высокая', cls: 'b-ok' },
+  medium: { label: 'средняя', cls: 'b-review' },
+  low: { label: 'низкая', cls: 'b-info' },
+};
+
+function confidenceBadge(level) {
+  const meta = CONFIDENCE[level] || CONFIDENCE.low;
+  return '<span class="badge ' + meta.cls + '"><span class="dot"></span>' + meta.label + '</span>';
 }
 
 function statusRow(label, value, tone) {
@@ -302,7 +314,8 @@ function renderWidget() {
     summary.actions + ' ' + pluralRu(summary.actions, 'предложение', 'предложения', 'предложений');
 
   let html =
-    statusRow('Безопасные исправления', summary.actions, summary.actions ? 'accent' : null) +
+    statusRow('Безопасные исправления', summary.normalizations, summary.normalizations ? 'accent' : null) +
+    statusRow('Связи со справочником', summary.matches, summary.matches ? 'accent' : null) +
     statusRow('Требуют внимания', summary.attention, summary.attention ? 'amber' : null) +
     statusRow('Блокирующие ошибки', summary.blocking, summary.blocking ? 'red' : null);
 
@@ -465,6 +478,7 @@ function renderReportPage() {
   const page = reportRuleIndex + 1;
   const total = reportRules.length;
   const count = rule.items.length;
+  const isMatch = rule.items[0].kind === 'match';
 
   document.getElementById('reportTitle').textContent = 'Изменения: ' + rule.name;
   document.getElementById('reportPageInfo').textContent = page + ' из ' + total;
@@ -472,18 +486,38 @@ function renderReportPage() {
     '<p class="report-reason">' + escapeHtml(rule.reason) + '</p>' +
     '<p class="report-count">' + count + ' ' + recordsWord(count) + '</p>';
 
+  // У сопоставлений другой состав колонок, поэтому шапка строится здесь.
+  document.getElementById('reportHead').innerHTML =
+    '<tr>' +
+    '<th class="col-check"><input type="checkbox" id="ruleCheckAll"' +
+      ' aria-label="Подтвердить все изменения этого правила" onchange="toggleRuleActions(this)"></th>' +
+    '<th class="col-app">Заявка</th>' +
+    (isMatch
+      ? '<th>Компания справочника</th><th class="col-conf">Уверенность</th><th>Совпало по</th>'
+      : '<th>Было</th><th>Стало</th>') +
+    '</tr>';
+
   const tbody = document.getElementById('reportTableBody');
   tbody.innerHTML = '';
   rule.items.forEach((action) => {
     const tr = document.createElement('tr');
     if (!accepted.has(action.id)) tr.classList.add('declined');
-    tr.innerHTML =
+
+    const head =
       '<td class="col-check"><input type="checkbox" ' + (accepted.has(action.id) ? 'checked' : '') +
         ' aria-label="Подтвердить изменение поля ' + escapeHtml(action.field) + ' для заявки ' + escapeHtml(action.recordId) + '"' +
         ' onchange="toggleAction(\'' + action.id + '\')"></td>' +
-      '<td class="col-app" title="' + escapeHtml(action.recordId) + '">' + escapeHtml(action.recordId) + '</td>' +
-      '<td class="cell-from" title="' + escapeHtml(action.before) + '">' + escapeHtml(action.before || '—') + '</td>' +
-      '<td class="cell-to" title="' + escapeHtml(action.after) + '">' + escapeHtml(action.after || '—') + '</td>';
+      '<td class="col-app" title="' + escapeHtml(action.recordId) + '">' + escapeHtml(action.recordId) + '</td>';
+
+    tr.innerHTML = isMatch
+      ? head +
+        '<td class="cell-to">' + escapeHtml(action.after) + '</td>' +
+        '<td class="col-conf">' + confidenceBadge(action.confidence) + '</td>' +
+        '<td class="cell-evidence">' + escapeHtml((action.evidence || []).join(', ')) + '</td>'
+      : head +
+        '<td class="cell-from" title="' + escapeHtml(action.before) + '">' + escapeHtml(action.before || '—') + '</td>' +
+        '<td class="cell-to" title="' + escapeHtml(action.after) + '">' + escapeHtml(action.after || '—') + '</td>';
+
     tbody.appendChild(tr);
   });
 

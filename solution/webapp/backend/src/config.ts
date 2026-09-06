@@ -10,6 +10,8 @@ export interface AppConfig {
   /** Пустой массив — CORS выключен: фронтенд ходит через тот же origin (nginx). */
   readonly corsOrigins: readonly string[];
   readonly exposeDocs: boolean;
+  /** Демонстрационный набор данных со справочниками; пустая строка отключает сопоставление. */
+  readonly datasetPath: string;
 }
 
 const ENVS = ['development', 'production', 'test'] as const;
@@ -56,5 +58,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((origin) => origin.trim())
       .filter(Boolean),
     exposeDocs: (env.APP_EXPOSE_DOCS ?? String(appEnv !== 'production')) === 'true',
+    datasetPath: env.APP_DATASET_PATH ?? '/app/data/raw/dev-sample.csv',
   };
 }

@@ -152,7 +152,7 @@ body {
 }
 
 .table-wrap { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
-table.grid { border-collapse: collapse; width: 100%; min-width: 1020px; }
+table.grid { border-collapse: collapse; width: 100%; min-width: 1150px; }
 table.grid th {
   position: sticky; top: 0; z-index: 2; background: var(--bg);
   height: 36px; text-align: left; padding: 0 12px;
@@ -169,6 +169,8 @@ table.grid tr.selected td { background: var(--purple-light); }
 table.grid tr.flagged td { background: var(--red-light); }
 table.grid .col-check { width: 44px; }
 table.grid .col-num { width: 52px; color: var(--text-muted); text-align: right; }
+table.grid .col-ref { width: 130px; font-variant-numeric: tabular-nums; }
+table.grid .muted { color: var(--text-muted); }
 table.grid td.col-primary { font-weight: 600; }
 table.grid th:last-child, table.grid td:last-child { border-right: none; }
 table.grid .cell { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
@@ -363,6 +365,8 @@ table.report-grid tr.declined td { color: var(--text-muted); }
 table.report-grid tr.declined .cell-to { font-weight: 400; }
 table.report-grid tr.declined .cell-to::before { background: #C7C9D1; }
 table.report-grid .col-app { width: 150px; color: var(--text-muted); }
+table.report-grid .col-conf { width: 120px; }
+table.report-grid .cell-evidence { color: var(--text-muted); font-size: 12px; }
 table.report-grid td { max-width: 320px; }
 #reportTableBody .cell-from { color: var(--text-muted); }
 #reportTableBody .cell-to { font-weight: 600; }

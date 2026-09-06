@@ -1,0 +1,5 @@
+record_type,company_ref_id,company_legal_name,company_short_name,company_inn,company_email,company_phone,company_city,company_aliases,company_active
+COMPANY_REFERENCE,CMP-1,"ООО «Ромашка Интеграция»",Ромашка Интеграция,7712345678,info@romashka.example,+74951234567,Москва,Romashka Integratsiya|Ромашка Интеграция Москва,1
+COMPANY_REFERENCE,CMP-2,"АО «Вектор Сеть»",Вектор Сеть,7798765432,info@vektor.example,+74957654321,Тула,,1
+COMPANY_REFERENCE,CMP-3,"ООО «Старый Склад»",Старый Склад,7700000001,info@sklad.example,+74950000001,Пермь,,0
+APPLICATION,,,,,,,,,

@@ -101,6 +101,7 @@
             <th>Начало</th>
             <th>Завершение</th>
             <th>Статус</th>
+            <th>Справочник</th>
             <th>Проверка</th>
           </tr>
         </thead>
@@ -179,17 +180,7 @@
       <div id="reportRuleBody"></div>
       <div class="report-table-wrap">
         <table class="grid report-grid" aria-label="Изменения по правилу">
-          <thead>
-            <tr>
-              <th class="col-check">
-                <input type="checkbox" id="ruleCheckAll" aria-label="Подтвердить все изменения этого правила"
-                       onchange="toggleRuleActions(this)">
-              </th>
-              <th class="col-app">Заявка</th>
-              <th>Было</th>
-              <th>Стало</th>
-            </tr>
-          </thead>
+          <thead id="reportHead"></thead>
           <tbody id="reportTableBody"></tbody>
         </table>
       </div>

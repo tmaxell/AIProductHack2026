@@ -1,14 +1,28 @@
 import { RULES } from './rules.js';
 import { fingerprint } from './fingerprint.js';
 import type { IssueSeverity } from './normalize/index.js';
+import {
+  EMPTY_INDEX,
+  matchCompany,
+  toQuery,
+  type CompanyIndex,
+  type Confidence,
+} from './matching/index.js';
+
+/** Поле, в которое записывается ссылка на запись справочника компаний. */
+export const COMPANY_REF_FIELD = 'company_ref_id';
 
 export interface SourceRecord {
   readonly id: string;
   readonly values: Readonly<Record<string, string | null>>;
 }
 
+/** Нормализация чинит формат значения, сопоставление связывает со справочником. */
+export type ActionKind = 'normalize' | 'match';
+
 /** Одно предлагаемое изменение одного поля одной записи. */
 export interface ChangeAction {
+  readonly kind: ActionKind;
   /** Детерминированный id: пересчёт того же набора данных даёт тот же id. */
   readonly id: string;
   readonly recordId: string;
@@ -19,6 +33,10 @@ export interface ChangeAction {
   readonly group: string;
   readonly before: string | null;
   readonly after: string | null;
+  /** Уровень уверенности сопоставления; у нормализации отсутствует. */
+  readonly confidence?: Confidence;
+  /** Признаки, по которым найдено совпадение: делают рекомендацию объяснимой. */
+  readonly evidence?: readonly string[];
 }
 
 export interface RecordIssue {
@@ -32,6 +50,8 @@ export interface RecordIssue {
 export interface ChangeSetSummary {
   readonly records: number;
   readonly actions: number;
+  readonly normalizations: number;
+  readonly matches: number;
   /** Замечания и предупреждения: требуют внимания человека. */
   readonly attention: number;
   /** Ошибки: изменение предложить нельзя. */
@@ -51,8 +71,80 @@ export function actionId(recordId: string, ruleCode: string): string {
   return `${recordId}::${ruleCode}`;
 }
 
+const COMPANY_RULE = {
+  code: 'company_reference',
+  name: 'Компания из справочника',
+  reason: 'Связывание заявки с записью справочника компаний',
+  group: 'Справочники',
+} as const;
+
+function matchAction(record: SourceRecord, index: CompanyIndex): {
+  action?: ChangeAction;
+  issue?: RecordIssue;
+} {
+  const outcome = matchCompany(
+    toQuery({
+      name: record.values.company_name,
+      inn: record.values.company_inn,
+      email: record.values.company_email,
+      phone: record.values.company_phone,
+      city: record.values.company_city,
+    }),
+    index,
+  );
+
+  if (outcome.kind === 'none') return {};
+
+  if (outcome.kind === 'ambiguous') {
+    return {
+      issue: {
+        recordId: record.id,
+        field: COMPANY_REF_FIELD,
+        code: 'AMBIGUOUS_COMPANY_MATCH',
+        severity: 'warning',
+        message:
+          `Справочнику соответствуют несколько компаний: ` +
+          outcome.candidates.map((candidate) => candidate.reference.id).join(', '),
+      },
+    };
+  }
+
+  if (outcome.kind === 'inactive') {
+    return {
+      issue: {
+        recordId: record.id,
+        field: COMPANY_REF_FIELD,
+        code: 'INACTIVE_COMPANY_MATCH',
+        severity: 'warning',
+        message: `Найдена неактивная запись справочника ${outcome.match.reference.id}`,
+      },
+    };
+  }
+
+  const current = record.values[COMPANY_REF_FIELD] ?? null;
+  if (current === outcome.match.reference.id) return {};
+
+  return {
+    action: {
+      kind: 'match',
+      id: actionId(record.id, COMPANY_RULE.code),
+      recordId: record.id,
+      field: COMPANY_REF_FIELD,
+      ruleCode: COMPANY_RULE.code,
+      ruleName: COMPANY_RULE.name,
+      reason: COMPANY_RULE.reason,
+      group: COMPANY_RULE.group,
+      before: current,
+      after: outcome.match.reference.id,
+      confidence: outcome.match.confidence,
+      evidence: outcome.match.factors.map((factor) => factor.label),
+    },
+  };
+}
+
 export function buildChangeSet(
   records: readonly SourceRecord[],
+  companyIndex: CompanyIndex = EMPTY_INDEX,
   now: Date = new Date(),
 ): ChangeSet {
   const actions: ChangeAction[] = [];
@@ -80,6 +172,7 @@ export function buildChangeSet(
       if (!result.changed) continue;
 
       actions.push({
+        kind: 'normalize',
         id: actionId(record.id, rule.code),
         recordId: record.id,
         field: rule.field,
@@ -90,6 +183,18 @@ export function buildChangeSet(
         before: raw ?? null,
         after: result.value,
       });
+    }
+  }
+
+  const normalizations = actions.length;
+
+  // Сопоставление идёт после нормализации: у него отдельный смысл и отдельная
+  // строка в сводке — это рекомендация связи, а не исправление формата.
+  if (companyIndex.size > 0) {
+    for (const record of records) {
+      const { action, issue: found } = matchAction(record, companyIndex);
+      if (action) actions.push(action);
+      if (found) issues.push(found);
     }
   }
 
@@ -104,6 +209,8 @@ export function buildChangeSet(
     summary: {
       records: records.length,
       actions: actions.length,
+      normalizations,
+      matches: actions.length - normalizations,
       attention: issues.filter((found) => found.severity !== 'error').length,
       blocking: issues.filter((found) => found.severity === 'error').length,
     },

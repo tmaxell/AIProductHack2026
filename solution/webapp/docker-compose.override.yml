@@ -11,6 +11,7 @@ services:
       APP_EXPOSE_DOCS: "true"
     volumes:
       - ./backend/src:/app/src:ro
+      - ../../data:/app/data:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
 

@@ -7,7 +7,12 @@ import {
   CreateChangeSetRequest,
 } from '../../contracts/change-set.js';
 import { applyActions, UnknownActionsError, type ApplyOutcome } from '../../domain/apply.js';
-import { buildChangeSet, type ChangeSet, type SourceRecord } from '../../domain/change-set.js';
+import {
+  buildChangeSet,
+  type ChangeAction,
+  type ChangeSet,
+  type SourceRecord,
+} from '../../domain/change-set.js';
 
 interface RecordDto {
   id: string;
@@ -24,12 +29,46 @@ function toRecordDtos(records: readonly SourceRecord[]): RecordDto[] {
   return records.map((record) => ({ id: record.id, values: { ...record.values } }));
 }
 
+interface ActionDto {
+  kind: 'normalize' | 'match';
+  id: string;
+  recordId: string;
+  field: string;
+  ruleCode: string;
+  ruleName: string;
+  reason: string;
+  group: string;
+  before: string | null;
+  after: string | null;
+  confidence?: 'high' | 'medium' | 'low';
+  evidence?: string[];
+}
+
+/** Доменные структуры readonly, схема ответа ожидает обычные массивы. */
+function toActionDto(action: ChangeAction): ActionDto {
+  const dto: ActionDto = {
+    kind: action.kind,
+    id: action.id,
+    recordId: action.recordId,
+    field: action.field,
+    ruleCode: action.ruleCode,
+    ruleName: action.ruleName,
+    reason: action.reason,
+    group: action.group,
+    before: action.before,
+    after: action.after,
+  };
+  if (action.confidence !== undefined) dto.confidence = action.confidence;
+  if (action.evidence !== undefined) dto.evidence = [...action.evidence];
+  return dto;
+}
+
 function toChangeSetDto(changeSet: ChangeSet) {
   return {
     id: changeSet.id,
     sourceFingerprint: changeSet.sourceFingerprint,
     createdAt: changeSet.createdAt,
-    actions: changeSet.actions.map((action) => ({ ...action })),
+    actions: changeSet.actions.map(toActionDto),
     issues: changeSet.issues.map((found) => ({ ...found })),
     summary: { ...changeSet.summary },
   };
@@ -38,7 +77,7 @@ function toChangeSetDto(changeSet: ChangeSet) {
 function toApplyDto(outcome: ApplyOutcome) {
   return {
     records: toRecordDtos(outcome.records),
-    applied: outcome.applied.map((action) => ({ ...action })),
+    applied: outcome.applied.map(toActionDto),
     skipped: outcome.skipped.map((entry) => ({ ...entry })),
   };
 }
@@ -56,7 +95,7 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
         response: { 200: ChangeSetSchema, 400: ErrorResponse },
       },
     },
-    (request) => toChangeSetDto(buildChangeSet(toDomain(request.body.records))),
+    (request) => toChangeSetDto(buildChangeSet(toDomain(request.body.records), fastify.companyIndex)),
   );
 
   fastify.post(
@@ -79,7 +118,7 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
     },
     (request, reply) => {
       const records = toDomain(request.body.records);
-      const changeSet = buildChangeSet(records);
+      const changeSet = buildChangeSet(records, fastify.companyIndex);
 
       if (changeSet.sourceFingerprint !== request.body.sourceFingerprint) {
         void reply.code(409).send({

@@ -31,9 +31,19 @@ export const RecordIssue = Type.Object(
   { $id: 'RecordIssue' },
 );
 
+export const Confidence = Type.Union(
+  [Type.Literal('high'), Type.Literal('medium'), Type.Literal('low')],
+  {
+    $id: 'Confidence',
+    description:
+      'Уровень уверенности сопоставления, а не вероятность: выводится из состава совпавших признаков',
+  },
+);
+
 export const ChangeAction = Type.Object(
   {
     id: Type.String({ description: 'Детерминированный id: <recordId>::<ruleCode>' }),
+    kind: Type.Union([Type.Literal('normalize'), Type.Literal('match')]),
     recordId: Type.String(),
     field: Type.String(),
     ruleCode: Type.String(),
@@ -42,6 +52,10 @@ export const ChangeAction = Type.Object(
     group: Type.String(),
     before: Type.Union([Type.String(), Type.Null()]),
     after: Type.Union([Type.String(), Type.Null()]),
+    confidence: Type.Optional(Type.Ref(Confidence)),
+    evidence: Type.Optional(
+      Type.Array(Type.String(), { description: 'Признаки, по которым найдено совпадение' }),
+    ),
   },
   { $id: 'ChangeAction' },
 );
@@ -50,6 +64,8 @@ export const ChangeSetSummary = Type.Object(
   {
     records: Type.Integer(),
     actions: Type.Integer(),
+    normalizations: Type.Integer({ description: 'Исправления формата значений' }),
+    matches: Type.Integer({ description: 'Предложенные связи со справочником' }),
     attention: Type.Integer({ description: 'Замечания и предупреждения' }),
     blocking: Type.Integer({ description: 'Ошибки, по которым изменение не предлагается' }),
   },
@@ -106,6 +122,7 @@ export const ApplyChangeSetResponse = Type.Object(
 export const CHANGE_SET_SCHEMAS = [
   SourceRecord,
   IssueSeverity,
+  Confidence,
   RecordIssue,
   ChangeAction,
   ChangeSetSummary,

@@ -12,6 +12,10 @@ services:
       APP_PORT: "8000"
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
       APP_EXPOSE_DOCS: ${APP_EXPOSE_DOCS:-false}
+    volumes:
+      # Демонстрационный набор данных со справочниками. В продукте источником
+      # будет пространство MWS Tables, поэтому это read-only и вне образа.
+      - ../../data:/app/data:ro
     expose:
       - "8000"
     # Healthcheck объявлен здесь, а не только в Dockerfile: dev-override
