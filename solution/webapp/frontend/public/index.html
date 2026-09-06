@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MWS Tables — дев выборка (Project Launch Copilot)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ ICON SPRITE (16px в toolbar, 20px в rail) ============ -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.2 9.2a3 3 0 0 1 5.8 1c0 2-2.9 2.6-2.9 4"/><path d="M12 17.5h.01"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-form" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></symbol>
+  <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></symbol>
+  <symbol id="i-integration" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.5 3.5l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.5 20.5l1.7-1.7"/></symbol>
+  <symbol id="i-hidden" viewBox="0 0 24 24"><path d="M17.9 17.9A10 10 0 0 1 12 20C5 20 1 12 1 12a18.4 18.4 0 0 1 5.1-5.9M9.9 4.2A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2m-6.7-1.1a3 3 0 1 1-4.2-4.2"/><path d="m1 1 22 22"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M22 3H2l8 9.5V19l4 2v-8.5z"/></symbol>
+  <symbol id="i-group" viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M19 12H5m0 0 7 7m-7-7 7-7"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M5 12h14m0 0-7-7m7 7-7 7"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- ============ ICON RAIL ============ -->
+  <nav class="icon-rail" aria-hidden="true">
+    <span class="rail-ic active"><svg class="ic ic-20"><use href="#i-home"/></svg></span>
+    <span class="rail-ic"><svg class="ic ic-20"><use href="#i-users"/></svg></span>
+    <span class="rail-ic"><svg class="ic ic-20"><use href="#i-globe"/></svg></span>
+    <span class="rail-ic"><svg class="ic ic-20"><use href="#i-settings"/></svg></span>
+    <span class="rail-spacer"></span>
+    <span class="rail-ic"><svg class="ic ic-20"><use href="#i-help"/></svg></span>
+    <span class="rail-ic"><svg class="ic ic-20"><use href="#i-user"/></svg></span>
+  </nav>
+
+  <!-- ============ EXPLORER ============ -->
+  <nav class="side-nav" aria-hidden="true">
+    <header class="ws-header">
+      <span class="ws-icon">9</span>
+      <span class="ws-name">9279821549 station</span>
+    </header>
+    <div class="nav-scroll">
+      <div class="nav-tabs">
+        <span class="nav-tab active">Проводник</span>
+        <span class="nav-tab">Закрепить</span>
+      </div>
+      <div class="nav-item"><svg class="ic"><use href="#i-plus"/></svg>Добавить</div>
+      <div class="nav-item"><svg class="ic"><use href="#i-upload"/></svg>Импорт</div>
+      <div class="nav-item"><svg class="ic"><use href="#i-folder"/></svg>Папка</div>
+      <div class="folder-label"><svg class="ic"><use href="#i-chevron"/></svg>Погружение</div>
+      <div class="nav-item folder-item"><svg class="ic"><use href="#i-form"/></svg>Новая форма 2</div>
+      <div class="nav-item folder-item active"><svg class="ic"><use href="#i-table"/></svg>дев выборка</div>
+      <div class="nav-item folder-item"><svg class="ic"><use href="#i-integration"/></svg>Новая интеграция</div>
+      <div class="nav-item folder-item"><svg class="ic"><use href="#i-form"/></svg>Новая форма</div>
+    </div>
+  </nav>
+
+  <!-- ============ TABLE ============ -->
+  <main class="main">
+    <header class="table-header">
+      <h1 class="table-title"><svg class="ic ic-18"><use href="#i-table"/></svg>дев выборка</h1>
+      <div class="view-tabs"><span class="view-tab active">Таблица</span></div>
+    </header>
+
+    <div class="table-toolbar">
+      <div class="tool-group static" aria-hidden="true">
+        <span class="tool-btn" title="Скрытые поля"><svg class="ic"><use href="#i-hidden"/></svg></span>
+        <span class="tool-btn" title="Фильтр"><svg class="ic"><use href="#i-filter"/></svg></span>
+        <span class="tool-btn" title="Группировка"><svg class="ic"><use href="#i-group"/></svg></span>
+        <span class="tool-btn" title="Сортировка"><svg class="ic"><use href="#i-sort"/></svg></span>
+      </div>
+      <div class="tb-search">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <input id="searchInput" type="search" placeholder="Поиск…" aria-label="Поиск по заявкам" oninput="onSearch(this.value)">
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="grid" id="gridTable" aria-label="Заявки представления «дев выборка»">
+        <thead>
+          <tr>
+            <th class="col-check"><input type="checkbox" id="checkAll" aria-label="Выбрать все заявки" onchange="toggleAll(this)"></th>
+            <th class="col-num">#</th>
+            <th class="col-primary">Название проекта</th>
+            <th>Компания</th>
+            <th>Город</th>
+            <th>Бюджет</th>
+            <th>Начало</th>
+            <th>Завершение</th>
+            <th>Статус</th>
+            <th>Проверка</th>
+          </tr>
+        </thead>
+        <tbody id="gridBody"></tbody>
+      </table>
+    </div>
+
+    <footer class="table-footer">
+      <span id="rowCount"></span>
+    </footer>
+  </main>
+
+  <!-- ============ WIDGET PANEL ============ -->
+  <aside class="widget-panel" id="widgetPanel" aria-label="Панель виджета">
+    <header class="wp-header">
+      <span class="wp-title">Project Launch Copilot</span>
+      <button class="icon-btn" onclick="toggleWidget()" aria-label="Свернуть панель виджета">
+        <svg class="ic"><use href="#i-close"/></svg>
+      </button>
+    </header>
+
+    <div class="wp-body">
+      <!-- Состояние «до запуска» -->
+      <section id="widgetIntro">
+        <h2 class="wp-state-title">Проверка заявок</h2>
+        <p class="wp-state-sub">Найдём форматные ошибки и подготовим список изменений.</p>
+        <div class="source-card">
+          <div class="source-label">Источник</div>
+          <div class="source-row">
+            <span class="source-value">дев выборка</span>
+            <span class="source-count" id="sourceCount"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Состояние «выполняется проверка» -->
+      <section id="widgetLoading" hidden>
+        <h2 class="wp-state-title">Проверяем заявки</h2>
+        <p class="wp-state-sub" id="loadingSub"></p>
+        <div class="spinner" aria-hidden="true"></div>
+      </section>
+
+      <!-- Состояние «после запуска» -->
+      <section id="validationSection" hidden>
+        <h2 class="wp-state-title" id="resultTitle">Проверка завершена</h2>
+        <p class="wp-state-sub" id="resultSub"></p>
+        <div id="statusRows"></div>
+      </section>
+    </div>
+
+    <div class="wp-actions">
+      <button class="btn-primary block" id="primaryBtn" onclick="runValidation()">Проверить данные</button>
+      <button class="btn-link" id="secondaryBtn" type="button" disabled>Настройки проверки</button>
+    </div>
+  </aside>
+
+  <button class="widget-reopen" id="widgetReopen" type="button" hidden onclick="toggleWidget()">Project Launch Copilot</button>
+</div>
+
+<!-- ============ REPORT MODAL ============ -->
+<div class="modal-overlay" id="reportModal">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+    <header class="m-head">
+      <h2 class="m-title" id="reportTitle">Изменения</h2>
+      <button class="icon-btn" onclick="closeReport()" aria-label="Закрыть отчёт">
+        <svg class="ic"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="m-body">
+      <div id="reportRuleBody"></div>
+      <div class="report-table-wrap">
+        <table class="grid report-grid" aria-label="Изменения по правилу">
+          <thead>
+            <tr>
+              <th class="col-app">Заявка</th>
+              <th>Было</th>
+              <th>Стало</th>
+            </tr>
+          </thead>
+          <tbody id="reportTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <footer class="m-foot">
+      <div class="pager">
+        <button class="icon-btn" id="reportPrev" onclick="reportPrev()" aria-label="Предыдущее правило">
+          <svg class="ic"><use href="#i-prev"/></svg>
+        </button>
+        <span class="pager-info" id="reportPageInfo">1 из 1</span>
+        <button class="icon-btn" id="reportNext" onclick="reportNext()" aria-label="Следующее правило">
+          <svg class="ic"><use href="#i-next"/></svg>
+        </button>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn-ghost" onclick="closeReport()">Закрыть</button>
+      <button class="btn-primary" id="reportApplyBtn" onclick="applyFromReport()">Применить все</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="data.js"></script>
+<script src="widget-script.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

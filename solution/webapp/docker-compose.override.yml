@@ -1,0 +1,19 @@
+# Подхватывается автоматически: `docker compose up` — это режим разработки.
+# Прод-подобный запуск: `docker compose -f docker-compose.yml up --build`.
+services:
+  backend:
+    build:
+      target: build
+    command: ["npx", "tsx", "watch", "src/index.ts"]
+    environment:
+      APP_ENV: development
+      APP_LOG_LEVEL: debug
+      APP_EXPOSE_DOCS: "true"
+    volumes:
+      - ./backend/src:/app/src:ro
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    volumes:
+      - ./frontend/public:/usr/share/nginx/html:ro
