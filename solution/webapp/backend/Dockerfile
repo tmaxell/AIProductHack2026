@@ -32,6 +32,8 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
+RUN mkdir -p /app/storage && chown node:node /app/storage
+
 # Образ node уже содержит непривилегированного пользователя node.
 USER node
 EXPOSE 8000

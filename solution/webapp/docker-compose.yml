@@ -12,10 +12,13 @@ services:
       APP_PORT: "8000"
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
       APP_EXPOSE_DOCS: ${APP_EXPOSE_DOCS:-false}
+      APP_STORAGE_PATH: /app/storage/change-sets.sqlite
     volumes:
       # Демонстрационный набор данных со справочниками. В продукте источником
       # будет пространство MWS Tables, поэтому это read-only и вне образа.
       - ../../data:/app/data:ro
+      # История draft/publish/rollback переживает пересоздание контейнера.
+      - change-set-storage:/app/storage
     expose:
       - "8000"
     # Healthcheck объявлен здесь, а не только в Dockerfile: dev-override
@@ -48,3 +51,6 @@ services:
 networks:
   webapp:
     driver: bridge
+
+volumes:
+  change-set-storage:
