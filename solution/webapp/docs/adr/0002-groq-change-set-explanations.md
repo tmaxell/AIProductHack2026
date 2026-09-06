@@ -17,9 +17,11 @@ Change Set API уже является источником истины для 
 ## Решение
 
 Backend вызывает OpenAI-compatible Groq Chat Completions API по HTTPS. Провайдер
-использует настраиваемые endpoint и model, strict Structured Outputs с JSON
-Schema, локальную проверку ответа, timeout и ограниченные повторы для `429` и
-`5xx`. Интеграция считается доступной только при наличии `GROQ_API_KEY`.
+использует настраиваемые endpoint и model, по умолчанию strict Structured
+Outputs с JSON Schema, локальную проверку ответа, timeout и ограниченные повторы
+для `429` и `5xx`. Режим можно переключить на best-effort или JSON Object для
+совместимой модели, не ослабляя локальную валидацию. Интеграция считается
+доступной только при наличии `GROQ_API_KEY`.
 
 Для сохранённой версии вводятся три операции:
 

@@ -70,6 +70,9 @@ Backend:
   результаты действий и append-only события хранятся в SQLite;
 - история, diff версий, публикация, `draft → published → superseded/discarded`
   и компенсирующий rollback доступны через versioned Change Set API;
+- необязательный Groq-слой объясняет выбранные действия только после отдельного
+  preview и явного согласия; маскированный payload, модель, prompt version и
+  результат/ошибка сохраняются в истории версии;
 - публикация использует существующие selective apply и `sourceFingerprint`,
   блокирует конфликт и идемпотентно возвращает сохранённый результат;
 - детерминированная нормализация в доменном слое, без зависимости от HTTP;
@@ -81,12 +84,13 @@ Backend:
 - `GET /api/v1/health`, единый формат ошибок, structured-логи, graceful shutdown;
 - конфигурация только из переменных окружения с проверкой на старте;
 - forward-only миграции SQLite и Docker named volume `change-set-storage`;
-- lint, проверка типов и 124 теста бекенда.
+- lint, проверка типов и 135 тестов бекенда.
 
 Frontend-демонстрация:
 
 - выбор области и полей проверки;
 - список версий, diff, выборочное подтверждение, публикация и rollback-preview;
+- disclosure-preview и сохранённые результаты AI-объяснения;
 - локальные matching сотрудников, классификация и preview плана задач с
   назначениями и итоговой сводкой.
 
@@ -111,9 +115,18 @@ Frontend-демонстрация:
 | `APP_CORS_ORIGINS` | пусто | Список origin через запятую; пусто — CORS выключен |
 | `APP_DATASET_PATH` | `/app/data/raw/dev-sample.csv` | Набор данных со справочником компаний |
 | `APP_STORAGE_PATH` | `./var/change-sets.sqlite` | SQLite-файл версий; Compose переопределяет на `/app/storage/change-sets.sqlite` |
+| `GROQ_API_KEY` | пусто | Включает AI-объяснение на backend; не передаётся во frontend |
+| `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | OpenAI-compatible endpoint провайдера |
+| `GROQ_MODEL` | `openai/gpt-oss-20b` | Модель с поддержкой выбранного structured output |
+| `GROQ_STRUCTURED_OUTPUT` | `strict` | `strict`, `best-effort` или `json-object` |
+| `GROQ_TIMEOUT_MS` | `15000` | Timeout одной попытки |
+| `GROQ_MAX_RETRIES` | `2` | Повторы для timeout, сети, `429` и `5xx` |
+| `GROQ_MAX_COMPLETION_TOKENS` | `1200` | Верхний предел ответа |
 
 Архитектурное решение, модель данных и правила rollback описаны в
 [`docs/adr/0001-persistent-change-set-versions.md`](docs/adr/0001-persistent-change-set-versions.md).
+Граница AI-слоя и правила раскрытия данных — в
+[`docs/adr/0002-groq-change-set-explanations.md`](docs/adr/0002-groq-change-set-explanations.md).
 
 Секреты в репозиторий не коммитятся: `.env` в `.gitignore`, в примере значений
 секретов нет.

@@ -70,8 +70,10 @@ export async function buildApp(
         apiKey: config.groqApiKey,
         baseUrl: config.groqBaseUrl,
         model: config.groqModel,
+        structuredOutput: config.groqStructuredOutput,
         timeoutMs: config.groqTimeoutMs,
         maxRetries: config.groqMaxRetries,
+        maxCompletionTokens: config.groqMaxCompletionTokens,
       });
   app.decorate(
     'explanations',

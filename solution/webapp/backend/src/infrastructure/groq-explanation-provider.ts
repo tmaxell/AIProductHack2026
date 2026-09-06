@@ -25,8 +25,10 @@ interface GroqProviderOptions {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly model: string;
+  readonly structuredOutput: 'strict' | 'best-effort' | 'json-object';
   readonly timeoutMs: number;
   readonly maxRetries: number;
+  readonly maxCompletionTokens: number;
   readonly fetchFn?: typeof fetch;
   readonly sleep?: (delayMs: number) => Promise<void>;
 }
@@ -67,7 +69,7 @@ export class GroqExplanationProvider implements ExplanationProvider {
           body: JSON.stringify({
             model: this.model,
             temperature: 0.1,
-            max_completion_tokens: 1200,
+            max_completion_tokens: this.options.maxCompletionTokens,
             messages: [
               {
                 role: 'system',
@@ -81,14 +83,16 @@ export class GroqExplanationProvider implements ExplanationProvider {
                 content: `Объясни выбранные изменения, доказательства, риски, открытые вопросы и следующие действия. Payload:\n${JSON.stringify(payload)}`,
               },
             ],
-            response_format: {
-              type: 'json_schema',
-              json_schema: {
-                name: 'change_set_explanation',
-                strict: true,
-                schema: OUTPUT_SCHEMA,
-              },
-            },
+            response_format: this.options.structuredOutput === 'json-object'
+              ? { type: 'json_object' }
+              : {
+                  type: 'json_schema',
+                  json_schema: {
+                    name: 'change_set_explanation',
+                    strict: this.options.structuredOutput === 'strict',
+                    schema: OUTPUT_SCHEMA,
+                  },
+                },
           }),
           signal: controller.signal,
         });

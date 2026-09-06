@@ -18,12 +18,15 @@ export interface AppConfig {
   readonly groqApiKey?: string;
   readonly groqBaseUrl: string;
   readonly groqModel: string;
+  readonly groqStructuredOutput: 'strict' | 'best-effort' | 'json-object';
   readonly groqTimeoutMs: number;
   readonly groqMaxRetries: number;
+  readonly groqMaxCompletionTokens: number;
 }
 
 const ENVS = ['development', 'production', 'test'] as const;
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
+const GROQ_STRUCTURED_OUTPUTS = ['strict', 'best-effort', 'json-object'] as const;
 
 class ConfigError extends Error {}
 
@@ -88,7 +91,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(groqApiKey ? { groqApiKey } : {}),
     groqBaseUrl: env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1',
     groqModel: env.GROQ_MODEL ?? 'openai/gpt-oss-20b',
+    groqStructuredOutput: pickEnum(
+      'GROQ_STRUCTURED_OUTPUT',
+      env.GROQ_STRUCTURED_OUTPUT,
+      GROQ_STRUCTURED_OUTPUTS,
+      'strict',
+    ),
     groqTimeoutMs: pickInteger('GROQ_TIMEOUT_MS', env.GROQ_TIMEOUT_MS, 15_000, 1_000, 60_000),
     groqMaxRetries: pickInteger('GROQ_MAX_RETRIES', env.GROQ_MAX_RETRIES, 2, 0, 5),
+    groqMaxCompletionTokens: pickInteger(
+      'GROQ_MAX_COMPLETION_TOKENS',
+      env.GROQ_MAX_COMPLETION_TOKENS,
+      1200,
+      200,
+      8000,
+    ),
   };
 }

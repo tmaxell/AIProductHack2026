@@ -1,7 +1,8 @@
 # Backend веб-приложения
 
 Fastify 5 + TypeScript, Node.js 22+. Версии Change Set хранятся в локальном
-SQLite-файле; внешних сервисов нет.
+SQLite-файле. Необязательный Groq-провайдер включается только backend-ключом;
+без него детерминированный сценарий работает полностью.
 
 ## Слои
 
@@ -48,6 +49,9 @@ npm run build      # компиляция в dist/
 | `POST` | `/api/v1/change-sets/:id/publish` | опубликовать accepted-действия |
 | `POST` | `/api/v1/change-sets/:id/rollback` | создать компенсирующий rollback-draft |
 | `POST` | `/api/v1/change-sets/:id/discard` | отбросить draft без удаления истории |
+| `POST` | `/api/v1/change-sets/:id/explanation-preview` | показать точный маскированный payload без внешнего вызова |
+| `POST` | `/api/v1/change-sets/:id/explanations` | после явного согласия получить и сохранить объяснение Groq |
+| `GET` | `/api/v1/change-sets/:id/explanations` | история результатов и ошибок объяснения |
 | `POST` | `/api/v1/change-sets/apply` | deprecated stateless selective apply для совместимости |
 | `GET` | `/api/v1/docs` | Swagger UI, только при `APP_EXPOSE_DOCS=true` |
 
@@ -65,6 +69,19 @@ npm run build      # компиляция в dist/
 SQLite открывается по `APP_STORAGE_PATH`. На старте backend транзакционно
 выполняет пронумерованные forward-only миграции. В Docker каталог смонтирован в
 named volume `change-set-storage`; `docker compose down -v` удаляет историю.
+
+## AI-объяснение
+
+Groq получает только выбранные действия сохранённой версии. Полные исходные
+строки не отправляются, record/action id заменяются псевдонимами, email,
+телефоны и ФИО маскируются. UI сначала вызывает локальный preview и показывает
+поля и значения, затем требует отдельное подтверждение внешней отправки.
+
+Провайдер не получает tools и не может менять решения, публиковать или делать
+rollback. Ответ валидируется по закрытой JSON Schema и сохраняется с моделью и
+`change-set-explanation-v1`; ошибки тоже сохраняются, но не меняют Change Set.
+Endpoint, модель, structured-output mode, timeout, retry и лимит ответа задаются
+переменными `GROQ_*`, перечисленными в `.env.example`.
 
 ## Справочник компаний
 

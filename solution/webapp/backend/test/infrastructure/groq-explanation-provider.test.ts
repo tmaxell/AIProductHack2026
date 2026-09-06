@@ -18,8 +18,10 @@ function provider(fetchFn: typeof fetch, maxRetries = 1) {
     apiKey: 'test-key',
     baseUrl: 'https://api.groq.test/openai/v1/',
     model: 'test-model',
+    structuredOutput: 'strict',
     timeoutMs: 1000,
     maxRetries,
+    maxCompletionTokens: 1200,
     fetchFn,
     sleep: () => Promise.resolve(),
   });
