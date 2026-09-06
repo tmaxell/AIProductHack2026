@@ -148,11 +148,12 @@ python3 -m http.server 8088 --bind 127.0.0.1
 ## Куда переезжает логика
 
 `widget-script.js` не зависит от DOM и экспортирует функции через `window.LPC`.
-Контракт будущего эндпоинта уже зафиксирован в
-[`contracts/validation.ts`](../../backend/src/contracts/validation.ts), а
-`POST /api/v1/validation/runs` до переноса честно отвечает `501`. Перенос в
-backend (`solution/webapp/backend/src/domain/`) этим изменением не сделан —
-только сама логика на фронтенде стала настоящей вместо фейковой.
+Backend уже предоставляет Change Set API и доменные правила в
+[`backend/src/domain/`](../../backend/src/domain/README.md), но текущий
+расширенный frontend-поток к нему ещё не подключён. Следующий этап — расширить
+контракт действиями matching сотрудников, классификации и preview задач,
+перенести `engine.js`/`launch.js` в backend и оставить в браузере только
+presentation layer.
 
 `data.js`/`companies.js`/`employees.js`/`templates.js` — временный источник
 данных; после переноса записи будут приходить из backend.
