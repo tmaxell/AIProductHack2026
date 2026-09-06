@@ -38,7 +38,6 @@ aitable/
 - ✅ **Флаги проблем** — помечают проблемные значения для ручной проверки
 
 **Документация:**
-- [`README-WIDGETS.md`](mini_widgets/README-WIDGETS.md) — полная спецификация
 - [`CHEATSHEET.md`](mini_widgets/CHEATSHEET.md) — шпаргалка для быстрого старта
 
 ---
@@ -251,7 +250,6 @@ aitable/
 ├── WIDGET-TEMPLATE.md       # Шаблон для создания виджетов
 │
 ├── mini_widgets/
-│   ├── README-WIDGETS.md    # Спецификация mini widgets
 │   ├── CHEATSHEET.md        # Шпаргалка
 │   ├── 01-normalize-basic.js
 │   ├── 02-normalize-emails.js
@@ -276,7 +274,6 @@ aitable/
 
 1. Прочитать [`CHEATSHEET.md`](mini_widgets/CHEATSHEET.md) (1 минута)
 2. Запустить `01-normalize-basic.js` на тестовой таблице
-3. Прочитать [`README-WIDGETS.md`](mini_widgets/README-WIDGETS.md) (5 минут)
 4. Запустить `script-project-launch-copilot-lite.js`
 
 ### Для разработчиков
