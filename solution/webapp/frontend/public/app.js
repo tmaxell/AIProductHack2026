@@ -493,9 +493,17 @@ function statusRow(label, value, tone) {
 
 function ruleList(rules) {
   if (!rules.length) return '';
-  return '<div class="rule-list">' + rules.map(r =>
-    '<div class="rule-row"><span class="rr-name">' + escapeHtml(r.meta.name) + '</span>' +
-    '<span class="rr-count">' + r.items.length + '</span></div>').join('') + '</div>';
+  // reportRules разбит на страницы по 50, поэтому одно правило встречается
+  // несколько раз: в сводке страницы схлопываются обратно в одну строку.
+  const merged = new Map();
+  rules.forEach(rule => {
+    const current = merged.get(rule.meta.key);
+    if (current) current.count += rule.items.length;
+    else merged.set(rule.meta.key, { name: rule.meta.name, count: rule.items.length });
+  });
+  return '<div class="rule-list">' + [...merged.values()].map(rule =>
+    '<div class="rule-row"><span class="rr-name">' + escapeHtml(rule.name) + '</span>' +
+    '<span class="rr-count">' + rule.count + '</span></div>').join('') + '</div>';
 }
 
 function launchReportLink() {
