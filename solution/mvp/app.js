@@ -91,13 +91,11 @@ function renderTable() {
     const tr = document.createElement('tr');
     if (hasRun && row._validationError) tr.classList.add('flagged');
     if (selectedRows.has(row.row_id)) tr.classList.add('selected');
-    const shortId = String(row.application_id || '').slice(0, 12);
     tr.innerHTML =
       '<td class="col-check"><input type="checkbox" aria-label="Выбрать заявку ' + escapeHtml(row.application_id) + '" ' +
         (selectedRows.has(row.row_id) ? 'checked' : '') + ' onclick="toggleRow(event,\'' + row.row_id + '\')"></td>' +
       '<td class="col-num">' + (idx + 1) + '</td>' +
-      '<td class="col-id" title="' + escapeHtml(row.application_id) + '">' + escapeHtml(shortId) + '</td>' +
-      '<td class="col-primary" title="' + escapeHtml(row.project_name) + '"><span class="cell">' + escapeHtml(row.project_name) + '</span></td>' +
+      '<td class="col-primary" title="' + escapeHtml(row.application_id) + ' · ' + escapeHtml(row.project_name) + '"><span class="cell">' + escapeHtml(row.project_name) + '</span></td>' +
       '<td title="' + escapeHtml(row.company_name) + '"><span class="cell">' + escapeHtml(row.company_name) + '</span></td>' +
       '<td>' + escapeHtml(row.company_city) + '</td>' +
       '<td>' + escapeHtml(row.budget) + '</td>' +
