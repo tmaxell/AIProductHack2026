@@ -160,7 +160,34 @@ function bullets(s, items, opts) {
   footer(s, 2);
 }
 
-/* ──────────────── 3. Постановка задачи и критерии ──────────────── */
+/* 3. Конкуренты */
+{
+  const s = newSlide();
+  title(s, "Конкуренты", "В РФ у нас один прямой конкурент");
+
+  const cards = [
+    ["Airtable в России не работает", "Блокировка аккаунтов с 19 февраля 2026, оплата картами РФ закрыта с 2022. Реестр ПО и 152-ФЗ обязательны для крупного бизнеса и госсектора."],
+    ["Weeek, Kaiten, Яндекс 360 — не про это", "Таск-трекеры и офисный пакет, а не конструкторы связанных таблиц. Нет двусторонних связей между записями."],
+    ["Бипиум — один такой, и слабый", "Интерфейс тяжёлый на больших объёмах, формулы только внутри строки, API — 100 запросов за 30 секунд на аккаунт."],
+  ];
+  const cw3 = 3.87;
+  cards.forEach(([h, d], i) => {
+    const x = M + i * (cw3 + 0.24);
+    card(s, x, 1.7, cw3, 3.9);
+    s.addText(h, {
+      x: x + 0.3, y: 2.0, w: cw3 - 0.6, h: 1.3, fontFace: F, fontSize: 18, bold: true,
+      color: WHITE, lineSpacing: 23, isTextBox: true, margin: 0,
+    });
+    s.addText(d, {
+      x: x + 0.3, y: 3.3, w: cw3 - 0.6, h: 2.1, fontFace: F, fontSize: 13, color: "E4DEF5",
+      lineSpacing: 18, valign: "top", isTextBox: true, margin: 0,
+    });
+  });
+
+  footer(s, 3);
+}
+
+/* ──────────────── 4. Постановка задачи и критерии ──────────────── */
 {
   const s = newSlide();
   title(s, "Постановка задачи и критерии успеха", "Что именно мы делаем и по чему будем измерять результат");
@@ -207,10 +234,10 @@ function bullets(s, items, opts) {
     });
   });
 
-  footer(s, 3, "Целевые пороги. Фактические значения будут измерены после реализации.");
+  footer(s, 4, "Целевые пороги. Фактические значения будут измерены после реализации.");
 }
 
-/* ─────────────── 4. Подход: двухэтапная валидация ─────────────── */
+/* ─────────────── 5. Подход: двухэтапная валидация ─────────────── */
 {
   const s = newSlide();
   title(s, "Выбранный подход: двухэтапная валидация", "Сценарий согласован с заказчиком 3 сентября");
@@ -246,14 +273,14 @@ function bullets(s, items, opts) {
     });
   });
 
-  s.addText("Человек остаётся в контуре на каждом неоднозначном решении — автоматизируется рутина, а не ответственность.", {
+  s.addText("Человек подтверждает каждое неоднозначное решение вручную.", {
     x: M, y: 6.4, w: CW, h: 0.36, fontFace: F, fontSize: 13, italic: true, color: PURPLE_LT, isTextBox: true, margin: 0,
   });
 
-  footer(s, 4);
+  footer(s, 5);
 }
 
-/* ───────────────── 5. Схема решения ───────────────── */
+/* ───────────────── 6. Схема решения ───────────────── */
 {
   const s = newSlide();
   title(s, "Схема решения", "Вся обработка выполняется внутри Widget Script");
@@ -307,10 +334,105 @@ function bullets(s, items, opts) {
     bullets(s, items, { x: x + 0.26, y: 3.88, w: bw3 - 0.52, h: 2.4, fontSize: 11.5 });
   });
 
-  footer(s, 5);
+  footer(s, 6);
 }
 
-/* ──────────── 6. Выполненные этапы и первые результаты ──────────── */
+/* ──────────── 7. Техническая реализация ──────────── */
+{
+  const s = newSlide();
+  title(s, "Техническая реализация", "Два независимых трека разработки");
+
+  const cw2 = 5.9, ch2 = 4.6, y2 = 1.8;
+  const tracks = [
+    ["Веб-приложение", "Фронтенд с продвинутой реализацией фичей", "Сквозной сценарий проверки заявки — от импорта до задач и исполнителей — уже работает как самостоятельное демо-приложение."],
+    ["Widget Script", "Виджет для встройки в MWS Tables", "Та же логика в формате, который встраивается в текущий функционал заказчика — без сборщика и внешних зависимостей."],
+  ];
+  tracks.forEach(([tag, h, d], i) => {
+    const x = M + i * (cw2 + 0.29);
+    card(s, x, y2, cw2, ch2, i === 0 ? CARD2 : CARD);
+    s.addShape(pres.ShapeType.roundRect, {
+      x: x + 0.32, y: y2 + 0.32, w: 2.5, h: 0.4, rectRadius: 0.2,
+      fill: { color: PURPLE, transparency: 15 }, line: { type: "none" },
+    });
+    s.addText(tag, {
+      x: x + 0.32, y: y2 + 0.32, w: 2.5, h: 0.4, fontFace: F, fontSize: 11.5, bold: true,
+      color: WHITE, align: "center", valign: "middle", isTextBox: true, margin: 0,
+    });
+    s.addText(h, {
+      x: x + 0.32, y: y2 + 1.1, w: cw2 - 0.64, h: 0.9, fontFace: F, fontSize: 22, bold: true,
+      color: WHITE, lineSpacing: 27, isTextBox: true, margin: 0,
+    });
+    s.addText(d, {
+      x: x + 0.32, y: y2 + 2.5, w: cw2 - 0.64, h: 1.7, fontFace: F, fontSize: 14, color: "E4DEF5",
+      lineSpacing: 20, valign: "top", isTextBox: true, margin: 0,
+    });
+  });
+
+  footer(s, 7);
+}
+
+/* 8. Виджет в MWS Tables — импорт */
+{
+  const s = newSlide();
+  title(s, "Как это работает в MWS Tables", "Импорт и нормализация выполняются прямо в панели виджета");
+
+  const path = require("path");
+  // Кроп на информативную часть скриншота (панель виджета со скриптом и логом,
+  // без левой половины с исходной таблицей) — крупнее и без лишнего на слайде.
+  const srcW = 2940, srcH = 1670, cropX0 = 1660, cropW = srcW - cropX0;
+  const H = 5.3, scale = H / srcH;
+  const imgW = cropW * scale, imgH = H;
+  const imgX = M, imgY = 1.65;
+  s.addImage({
+    path: path.join(__dirname, "assets", "widget-import.png"),
+    x: imgX, y: imgY, w: srcW * scale, h: srcH * scale,
+    sizing: { type: "crop", x: cropX0 * scale, y: 0, w: imgW, h: imgH },
+  });
+
+  const bx = imgX + imgW + 0.4, bw = CW - imgW - 0.4;
+  card(s, bx, imgY, bw, imgH, CARD2);
+  s.addText("Скрипт выполняется прямо в панели виджета", {
+    x: bx + 0.32, y: imgY + 0.34, w: bw - 0.64, h: 1.0, fontFace: F, fontSize: 20, bold: true,
+    color: WHITE, lineSpacing: 25, isTextBox: true, margin: 0,
+  });
+  bullets(s, [
+    "Импорт делится на партиции по 100 записей — 84 партиции, 8 359 строк",
+    "Прогресс обработки виден построчно, в реальном времени",
+    "По завершении — статус «Готово», прямо в MWS Tables",
+  ], { x: bx + 0.32, y: imgY + 1.5, w: bw - 0.64, h: imgH - 1.7, fontSize: 15, lineSpacing: 20, paraSpaceAfter: 10 });
+
+  footer(s, 8);
+}
+
+/* 9. Виджет в MWS Tables — preview и подтверждение */
+{
+  const s = newSlide();
+  title(s, "Как это работает в MWS Tables", "Preview и подтверждение — до этого момента данные не меняются");
+
+  const path = require("path");
+  const imgH2 = 5.3, imgW2 = imgH2 * (1310 / 1594);
+  const imgX2 = M, imgY2 = 1.65;
+  s.addImage({
+    path: path.join(__dirname, "assets", "widget-preview.png"),
+    x: imgX2, y: imgY2, w: imgW2, h: imgH2,
+  });
+
+  const bx = imgX2 + imgW2 + 0.4, bw = CW - imgW2 - 0.4;
+  card(s, bx, imgY2, bw, imgH2, CARD2);
+  s.addText("Каждая правка — «было → стало»", {
+    x: bx + 0.32, y: imgY2 + 0.34, w: bw - 0.64, h: 0.9, fontFace: F, fontSize: 20, bold: true,
+    color: WHITE, lineSpacing: 25, isTextBox: true, margin: 0,
+  });
+  bullets(s, [
+    "24 386 исправлений найдено в одном источнике: «ё/е», лишние пробелы, служебные символы",
+    "Ничего не применяется, пока оператор не введёт подтверждение",
+    "Так же проверяются дубли и связи между таблицами",
+  ], { x: bx + 0.32, y: imgY2 + 1.4, w: bw - 0.64, h: imgH2 - 1.6, fontSize: 15, lineSpacing: 20, paraSpaceAfter: 10 });
+
+  footer(s, 9);
+}
+
+/* ──────────── 10. Выполненные этапы и первые результаты ──────────── */
 {
   const s = newSlide();
   title(s, "Выполненные этапы и первые результаты", "Продуктовый и исследовательский контур закрыт, реализация виджета стартует");
@@ -372,10 +494,10 @@ function bullets(s, items, opts) {
     x: bx + 0.26, y: 4.94, w: bw - 0.52, h: 1.3, fontFace: F, fontSize: 12.5, color: "E4DEF5", lineSpacing: 17, valign: "top", isTextBox: true, margin: 0,
   });
 
-  footer(s, 6);
+  footer(s, 10);
 }
 
-/* ──────────── 7. Unit-экономика и монетизация ──────────── */
+/* ──────────── 11. Unit-экономика и монетизация ──────────── */
 {
   const s = newSlide();
   title(s, "Unit-экономика и упаковка", "Статус: сценарная гипотеза, не прогноз и не утверждённая цена");
@@ -401,7 +523,7 @@ function bullets(s, items, opts) {
   });
 
   card(s, M, 4.86, CW, 1.62, CARD2);
-  s.addText("Что это значит для решения", {
+  s.addText("Модель продажи", {
     x: M + 0.3, y: 5.04, w: CW - 0.6, h: 0.32, fontFace: F, fontSize: 15, bold: true, color: WHITE, isTextBox: true, margin: 0,
   });
   s.addText([
@@ -413,10 +535,10 @@ function bullets(s, items, opts) {
     lineSpacing: 16, paraSpaceAfter: 4, valign: "top", isTextBox: true,
   });
 
-  footer(s, 7);
+  footer(s, 11);
 }
 
-/* ──────────── 8. Риски и план до финала ──────────── */
+/* ──────────── 12. Риски и план до финала ──────────── */
 {
   const s = newSlide();
   title(s, "Основные риски и план до финальной защиты", "Финальная сдача — 7 сентября 2026, 10:00");
@@ -465,10 +587,10 @@ function bullets(s, items, opts) {
     });
   });
 
-  footer(s, 8, "Резерв по объёму: поиск аномалий и оптимизация распределения задач добавляются только при готовом базовом сценарии.");
+  footer(s, 12, "Резерв по объёму: поиск аномалий и оптимизация распределения задач добавляются только при готовом базовом сценарии.");
 }
 
-/* ──────────── 9. Команда ──────────── */
+/* ──────────── 13. Команда ──────────── */
 {
   const s = newSlide();
   title(s, "Команда и зоны ответственности", "Все участники активно вовлечены и участвуют в создании решения");
@@ -524,7 +646,7 @@ function bullets(s, items, opts) {
     });
   });
 
-  footer(s, 9);
+  footer(s, 13);
 }
 
 // writeFile() в pptxgenjs 4.0.1 игнорирует compression в Node, поэтому пишем поток сами.
