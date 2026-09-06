@@ -42,7 +42,47 @@ describe('phone', () => {
   });
 
   test('маскированный номер помечается предупреждением', () => {
+    expect(normalizePhone('+7925*****02')).toMatchObject({
+      value: '+7925*****02',
+      changed: false,
+    });
     expect(codes(normalizePhone('+7925*****02'))).toContain('MASKED_PHONE');
+  });
+
+  test('принимает валидный международный номер только с кодом страны', () => {
+    expect(normalizePhone('+44 20 7946 0958')).toMatchObject({
+      value: '+442079460958',
+      changed: true,
+      issues: [],
+    });
+  });
+
+  test.each([
+    'abc1234567890xyz',
+    'ИНН 1234567890',
+    '12345abc67890',
+    '0000000000',
+    '799999999999',
+    '8-800-FLOWERS',
+  ])('не извлекает телефон из мусора: %s', (raw) => {
+    const result = normalizePhone(raw);
+    expect(result).toMatchObject({ value: raw, changed: false });
+    expect(codes(result)).toContain('BAD_PHONE');
+  });
+
+  test('распознаёт явную подпись телефона', () => {
+    expect(normalizePhone('тел. +7 (925) 952-11-02')).toMatchObject({
+      value: '+79259521102',
+      changed: true,
+      issues: [],
+    });
+  });
+
+  test('не отбрасывает добавочный номер молча', () => {
+    const raw = '+7 (495) 123-45-67 доб. 123';
+    const result = normalizePhone(raw);
+    expect(result).toMatchObject({ value: raw, changed: false });
+    expect(codes(result)).toContain('PHONE_EXTENSION_PRESENT');
   });
 });
 
