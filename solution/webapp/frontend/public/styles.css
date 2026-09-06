@@ -155,7 +155,7 @@ button.tool-btn:hover { background: var(--bg-hover); color: var(--text); }
 }
 
 .table-wrap { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
-table.grid { border-collapse: collapse; width: 100%; min-width: 1150px; }
+table.grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
 table.grid th {
   position: sticky; top: 0; z-index: 2; background: var(--bg);
   height: 36px; text-align: left; padding: 0 12px;
@@ -173,6 +173,12 @@ table.grid tr.flagged td { background: var(--red-light); }
 table.grid .col-check { width: 44px; }
 table.grid .col-num { width: 52px; color: var(--text-muted); text-align: right; }
 table.grid .col-ref { width: 130px; font-variant-numeric: tabular-nums; }
+table.grid th.col-check, table.grid td.col-check { position: sticky; left: 0; z-index: 3; background: var(--bg); }
+table.grid th.col-num, table.grid td.col-num { position: sticky; left: 44px; z-index: 3; background: var(--bg); }
+table.grid th.col-ref, table.grid td.col-ref { position: sticky; left: 96px; z-index: 3; background: var(--bg); box-shadow: 1px 0 var(--border); }
+table.grid thead th.col-check, table.grid thead th.col-num, table.grid thead th.col-ref { z-index: 4; }
+table.grid tr.selected td.col-check, table.grid tr.selected td.col-num, table.grid tr.selected td.col-ref { background: var(--purple-light); }
+table.grid tr.flagged td.col-check, table.grid tr.flagged td.col-num, table.grid tr.flagged td.col-ref { background: var(--red-light); }
 table.grid .muted { color: var(--text-muted); }
 table.grid td.col-primary { font-weight: 600; }
 table.grid th:last-child, table.grid td:last-child { border-right: none; }
@@ -182,6 +188,15 @@ table.grid tr.empty-row td {
   color: var(--text-muted); border-right: none;
 }
 table.grid tr.empty-row:hover td { background: var(--bg); }
+.relation-cell { min-width: 160px; }
+.relation-chip {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 220px;
+  padding: 4px 8px; border: 1px solid #CFC5F8; border-radius: 999px;
+  background: var(--purple-light); color: var(--purple-text); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+}
+.relation-node { width: 7px; height: 7px; border-radius: 50%; background: var(--purple); flex: none; }
+.relation-empty { color: var(--text-muted); font-size: 12px; }
 
 .table-footer {
   flex: none; padding: 8px 16px;

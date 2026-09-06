@@ -132,23 +132,25 @@ function getScope() {
 // widget-script.js#buildShadowApplication реально подменяет отключённое поле на null ещё до
 // того, как оно попадёт в engine.js — для движка оно как будто отсутствует, а не просто скрыто.
 const FIELD_META = [
+  { key: 'application_id',  label: 'Номер заявки',     column: true },
   { key: 'project_name',   label: 'Название проекта', column: true },
+  { key: 'project_description', label: 'Описание проекта', column: true },
   { key: 'company_name',   label: 'Компания',         column: true },
+  { key: 'company_inn',     label: 'ИНН компании',     column: true },
+  { key: 'company_email',   label: 'Email компании',   column: true },
+  { key: 'company_phone',   label: 'Телефон компании', column: true },
   { key: 'company_city',   label: 'Город',            column: true },
+  { key: 'requester_fio',   label: 'ФИО заявителя',    column: true },
+  { key: 'requester_email', label: 'Email заявителя',  column: true },
+  { key: 'requester_phone', label: 'Телефон заявителя', column: true },
+  { key: 'project_type',    label: 'Тип проекта',      column: true },
+  { key: 'priority',        label: 'Приоритет',        column: true },
   { key: 'budget',         label: 'Бюджет',           column: true },
-  { key: 'currency',       label: 'Валюта',           column: false },
+  { key: 'currency',       label: 'Валюта',           column: true },
   { key: 'planned_start',  label: 'Дата начала',      column: true },
   { key: 'planned_end',    label: 'Дата окончания',   column: true },
   { key: 'status',         label: 'Статус',           column: true },
-  { key: 'company_email',   label: 'Email компании',   column: false },
-  { key: 'requester_email', label: 'Email заявителя',  column: false },
-  { key: 'company_phone',   label: 'Телефон компании', column: false },
-  { key: 'requester_phone', label: 'Телефон заявителя', column: false },
-  { key: 'company_inn',     label: 'ИНН компании',     column: false },
-  { key: 'requester_fio',   label: 'ФИО заявителя',    column: false },
-  { key: 'priority',        label: 'Приоритет',        column: false },
-  { key: 'project_type',    label: 'Тип проекта',      column: false },
-  { key: 'application_id',  label: 'Номер заявки',     column: false },
+  { key: 'comment',         label: 'Комментарий',       column: true },
 ];
 const visibleColumns = {};
 FIELD_META.forEach(c => { visibleColumns[c.key] = true; });
@@ -237,6 +239,12 @@ function visibleRecords() {
     .some(v => String(v || '').toLowerCase().includes(s)));
 }
 
+function renderRelationChip(value, label) {
+  if (!value) return '<span class="relation-empty">Не связана</span>';
+  return '<span class="relation-chip" title="' + escapeHtml(label + ': ' + value) + '">' +
+    '<span class="relation-node" aria-hidden="true"></span>' + escapeHtml(value) + '</span>';
+}
+
 function renderTable() {
   const tbody = document.getElementById('gridBody');
   if (!tbody) return;
@@ -246,7 +254,7 @@ function renderTable() {
   if (!list.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    tr.innerHTML = '<td colspan="10">' +
+    tr.innerHTML = '<td colspan="24">' +
       (records.length ? 'По запросу «' + escapeHtml(searchQuery) + '» ничего не найдено'
                       : 'В представлении нет записей') + '</td>';
     tbody.appendChild(tr);
@@ -265,13 +273,27 @@ function renderTable() {
       '<td class="col-check"><input type="checkbox" aria-label="Выбрать заявку ' + escapeHtml(row.application_id) + '" ' +
         (selectedRows.has(row.row_id) ? 'checked' : '') + ' onclick="toggleRow(event,\'' + row.row_id + '\')"></td>' +
       '<td class="col-num">' + (idx + 1) + '</td>' +
+      '<td class="col-ref" data-col="application_id">' + escapeHtml(row.application_id) + '</td>' +
       '<td class="col-primary" data-col="project_name" title="' + escapeHtml(row.application_id) + ' · ' + escapeHtml(row.project_name) + '"><span class="cell">' + escapeHtml(row.project_name) + '</span></td>' +
+      '<td data-col="project_description" title="' + escapeHtml(row.project_description) + '"><span class="cell">' + escapeHtml(row.project_description) + '</span></td>' +
       '<td data-col="company_name" title="' + escapeHtml(row.company_name) + '"><span class="cell">' + escapeHtml(row.company_name) + '</span></td>' +
+      '<td data-col="company_inn">' + escapeHtml(row.company_inn) + '</td>' +
+      '<td data-col="company_email">' + escapeHtml(row.company_email) + '</td>' +
+      '<td data-col="company_phone">' + escapeHtml(row.company_phone) + '</td>' +
       '<td data-col="company_city">' + escapeHtml(row.company_city) + '</td>' +
+      '<td data-col="requester_fio">' + escapeHtml(row.requester_fio) + '</td>' +
+      '<td data-col="requester_email">' + escapeHtml(row.requester_email) + '</td>' +
+      '<td data-col="requester_phone">' + escapeHtml(row.requester_phone) + '</td>' +
+      '<td data-col="project_type">' + escapeHtml(row.project_type) + '</td>' +
+      '<td data-col="priority">' + escapeHtml(row.priority) + '</td>' +
       '<td data-col="budget">' + escapeHtml(row.budget) + '</td>' +
+      '<td data-col="currency">' + escapeHtml(row.currency) + '</td>' +
       '<td data-col="planned_start">' + escapeHtml(row.planned_start) + '</td>' +
       '<td data-col="planned_end">' + escapeHtml(row.planned_end) + '</td>' +
       '<td data-col="status"><span class="badge ' + st.cls + '"><span class="dot"></span>' + escapeHtml(st.label) + '</span></td>' +
+      '<td data-col="comment" title="' + escapeHtml(row.comment) + '"><span class="cell">' + escapeHtml(row.comment) + '</span></td>' +
+      '<td class="relation-cell">' + renderRelationChip(row.company_link, 'Компания') + '</td>' +
+      '<td class="relation-cell">' + renderRelationChip(row.duplicate_link, 'Дубликат') + '</td>' +
       '<td data-col="validation"><span class="badge ' + chk.cls + '"><span class="dot"></span>' + escapeHtml(chk.label) + '</span></td>';
     tbody.appendChild(tr);
   });

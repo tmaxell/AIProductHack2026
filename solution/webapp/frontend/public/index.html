@@ -98,13 +98,27 @@
           <tr>
             <th class="col-check" title="Отметьте заявки, которые нужно обработать — иначе скрипт прогонит всю таблицу"><input type="checkbox" id="checkAll" aria-label="Выбрать все заявки" onchange="toggleAll(this)"></th>
             <th class="col-num">#</th>
+            <th class="col-ref" data-col="application_id">Номер заявки</th>
             <th class="col-primary" data-col="project_name">Название проекта</th>
+            <th data-col="project_description">Описание проекта</th>
             <th data-col="company_name">Компания</th>
+            <th data-col="company_inn">ИНН компании</th>
+            <th data-col="company_email">Email компании</th>
+            <th data-col="company_phone">Телефон компании</th>
             <th data-col="company_city">Город</th>
+            <th data-col="requester_fio">ФИО заявителя</th>
+            <th data-col="requester_email">Email заявителя</th>
+            <th data-col="requester_phone">Телефон заявителя</th>
+            <th data-col="project_type">Тип проекта</th>
+            <th data-col="priority">Приоритет</th>
             <th data-col="budget">Бюджет</th>
+            <th data-col="currency">Валюта</th>
             <th data-col="planned_start">Начало</th>
             <th data-col="planned_end">Завершение</th>
             <th data-col="status">Статус</th>
+            <th data-col="comment">Комментарий</th>
+            <th>Связь: компания</th>
+            <th>Связь: дубликат</th>
             <th data-col="validation">Проверка</th>
           </tr>
         </thead>

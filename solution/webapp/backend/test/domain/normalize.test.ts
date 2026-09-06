@@ -149,6 +149,16 @@ describe('city', () => {
     expect(normalizeCity('Vladivostok')).toMatchObject({ value: 'Владивосток' });
   });
 
+  test('начинает название города с прописной буквы', () => {
+    expect(normalizeCity('калининград')).toMatchObject({ value: 'Калининград', changed: true });
+    expect(normalizeCity('г. краснодар')).toMatchObject({ value: 'Краснодар', changed: true });
+    expect(normalizeCity('нижний новгород')).toMatchObject({ value: 'Нижний новгород' });
+    expect(normalizeCity('Ростов-на-Дону')).toMatchObject({
+      value: 'Ростов-на-Дону',
+      changed: false,
+    });
+  });
+
   test('неизвестная латиница остаётся, но помечается замечанием', () => {
     const result = normalizeCity('Metropolis');
     expect(result.value).toBe('Metropolis');

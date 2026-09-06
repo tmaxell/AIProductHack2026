@@ -35,6 +35,11 @@ export function normalizeCity(raw: unknown): NormalizationResult {
   const alias = ALIASES.get(value.toLowerCase());
   if (alias !== undefined) value = alias;
 
+  // Название населённого пункта — отображаемое собственное имя. Меняем только
+  // первый буквенный символ и не применяем title case ко всей строке, чтобы не
+  // испортить корректный регистр в значениях вроде «Ростов-на-Дону».
+  value = value.replace(/^\p{L}/u, (first) => first.toLocaleUpperCase('ru-RU'));
+
   const issues: NormalizationIssue[] = [];
   if (/[A-Za-z]/.test(value)) {
     issues.push(
