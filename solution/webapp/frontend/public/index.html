@@ -76,8 +76,12 @@
     </header>
 
     <div class="table-toolbar">
+      <div class="tool-group">
+        <button class="tool-btn" type="button" title="Скрытые поля" aria-label="Настройки проверки: область запуска и поля" onclick="openSettings()">
+          <svg class="ic"><use href="#i-hidden"/></svg>
+        </button>
+      </div>
       <div class="tool-group static" aria-hidden="true">
-        <span class="tool-btn" title="Скрытые поля"><svg class="ic"><use href="#i-hidden"/></svg></span>
         <span class="tool-btn" title="Фильтр"><svg class="ic"><use href="#i-filter"/></svg></span>
         <span class="tool-btn" title="Группировка"><svg class="ic"><use href="#i-group"/></svg></span>
         <span class="tool-btn" title="Сортировка"><svg class="ic"><use href="#i-sort"/></svg></span>
@@ -92,16 +96,16 @@
       <table class="grid" id="gridTable" aria-label="Заявки представления «дев выборка»">
         <thead>
           <tr>
-            <th class="col-check"><input type="checkbox" id="checkAll" aria-label="Выбрать все заявки" onchange="toggleAll(this)"></th>
+            <th class="col-check" title="Отметьте заявки, которые нужно обработать — иначе скрипт прогонит всю таблицу"><input type="checkbox" id="checkAll" aria-label="Выбрать все заявки" onchange="toggleAll(this)"></th>
             <th class="col-num">#</th>
-            <th class="col-primary">Название проекта</th>
-            <th>Компания</th>
-            <th>Город</th>
-            <th>Бюджет</th>
-            <th>Начало</th>
-            <th>Завершение</th>
-            <th>Статус</th>
-            <th>Проверка</th>
+            <th class="col-primary" data-col="project_name">Название проекта</th>
+            <th data-col="company_name">Компания</th>
+            <th data-col="company_city">Город</th>
+            <th data-col="budget">Бюджет</th>
+            <th data-col="planned_start">Начало</th>
+            <th data-col="planned_end">Завершение</th>
+            <th data-col="status">Статус</th>
+            <th data-col="validation">Проверка</th>
           </tr>
         </thead>
         <tbody id="gridBody"></tbody>
@@ -134,6 +138,7 @@
             <span class="source-count" id="sourceCount"></span>
           </div>
         </div>
+        <div id="introDisabledFields"></div>
       </section>
 
       <!-- Состояние «выполняется проверка» -->
@@ -153,7 +158,7 @@
 
     <div class="wp-actions">
       <button class="btn-primary block" id="primaryBtn" onclick="runValidation()">Проверить данные</button>
-      <button class="btn-link" id="secondaryBtn" type="button" disabled>Настройки проверки</button>
+      <button class="btn-link" id="secondaryBtn" type="button" onclick="openSettings()">Настройки проверки</button>
     </div>
   </aside>
 
@@ -201,10 +206,75 @@
   </div>
 </div>
 
+<!-- ============ SETTINGS MODAL (область запуска + поля для анализа) ============ -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <header class="m-head">
+      <h2 class="m-title" id="settingsTitle">Настройки проверки</h2>
+      <button class="icon-btn" onclick="closeSettings()" aria-label="Закрыть настройки">
+        <svg class="ic"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="m-body">
+      <div class="block-label">Область запуска</div>
+      <p class="settings-hint" id="settingsScope"></p>
+      <p class="settings-hint">Выбор — чекбоксами в строках таблицы (колонка слева). Ничего не отмечено — проверяются все записи.</p>
+
+      <div class="block-label" style="margin-top:16px">Поля для проверки</div>
+      <p class="settings-hint">Снятая галка полностью исключает поле из проверки, а не просто скрывает его с экрана.</p>
+      <div class="field-list" id="settingsFields"></div>
+    </div>
+    <footer class="m-foot">
+      <button class="btn-ghost" onclick="resetFields()">Включить все поля</button>
+      <span class="spacer"></span>
+      <button class="btn-primary" onclick="closeSettings()">Готово</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============ LAUNCH REPORT MODAL (Milestones 8-10: задачи, исполнители, итог) ============ -->
+<div class="modal-overlay" id="launchModal">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="launchTitle">
+    <header class="m-head">
+      <h2 class="m-title" id="launchTitle">Итоговый отчёт запуска</h2>
+      <button class="icon-btn" onclick="closeLaunchReport()" aria-label="Закрыть отчёт">
+        <svg class="ic"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="m-body">
+      <div id="launchSummary" style="margin-bottom:14px"></div>
+      <div class="report-table-wrap">
+        <table class="grid report-grid" aria-label="Итоговый план запуска по заявкам">
+          <thead>
+            <tr>
+              <th style="width:28px"></th>
+              <th class="col-app">Заявка</th>
+              <th>Компания</th>
+              <th>Тип проекта</th>
+              <th>Готовность</th>
+              <th>Задачи</th>
+            </tr>
+          </thead>
+          <tbody id="launchTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <footer class="m-foot">
+      <span class="spacer"></span>
+      <button class="btn-ghost" onclick="closeLaunchReport()">Закрыть</button>
+    </footer>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="data.js"></script>
+<script src="companies.js"></script>
+<script src="employees.js"></script>
+<script src="templates.js"></script>
+<script src="engine.js"></script>
 <script src="widget-script.js"></script>
+<script src="launch.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
