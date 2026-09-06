@@ -75,8 +75,8 @@ Backend:
   результаты действий и append-only события хранятся в SQLite;
 - история, diff версий, публикация, `draft → published → superseded/discarded`
   и компенсирующий rollback доступны через versioned Change Set API;
-- необязательный Groq-слой объясняет выбранные действия только после отдельного
-  preview и явного согласия; маскированный payload, модель, prompt version и
+- необязательный Groq-слой объясняет выбранные действия сразу после явного
+  нажатия «AI-объяснение»; маскированный payload, модель, prompt version и
   результат/ошибка сохраняются в истории версии;
 - публикация использует существующие selective apply и `sourceFingerprint`,
   блокирует конфликт и идемпотентно возвращает сохранённый результат;
@@ -95,12 +95,15 @@ Frontend-демонстрация:
 
 - выбор области и полей проверки;
 - список версий, diff, выборочное подтверждение, публикация и rollback-preview;
-- disclosure-preview и сохранённые результаты AI-объяснения;
+- disclosure фактически переданных полей и сохранённые результаты AI-объяснения;
 - локальные matching сотрудников, классификация и preview плана задач с
   назначениями и итоговой сводкой.
 
 Ещё не сделано:
 
+- UI пока анализирует 30 демонстрационных заявок, а полный корпус из 6800
+  используется backend только для поиска дублей; переход на полный snapshot и
+  серверную пагинацию спроектирован в ADR 0003;
 - локальные matching сотрудников, классификация и план задач ещё не перенесены
   в Change Set API и остаются только неподтверждаемыми подсказками UI;
 - нет реальных связей Link/Lookup и записей Project/Task: frontend показывает
@@ -132,6 +135,8 @@ Frontend-демонстрация:
 [`docs/adr/0001-persistent-change-set-versions.md`](docs/adr/0001-persistent-change-set-versions.md).
 Граница AI-слоя и правила раскрытия данных — в
 [`docs/adr/0002-groq-change-set-explanations.md`](docs/adr/0002-groq-change-set-explanations.md).
+Полный анализ выгрузки и пагинация действий спроектированы в
+[`docs/adr/0003-full-export-analysis-and-action-pagination.md`](docs/adr/0003-full-export-analysis-and-action-pagination.md).
 
 Секреты в репозиторий не коммитятся: `.env` в `.gitignore`, в примере значений
 секретов нет. `make security-check` проверяет это перед публикацией ветки.
