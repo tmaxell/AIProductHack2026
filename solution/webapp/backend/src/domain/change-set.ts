@@ -215,11 +215,11 @@ export function buildChangeSet(
       const result = rule.normalize(raw);
       if (result.value === null) continue;
 
+      const hasError = result.issues.some((found) => found.severity === 'error');
+
       const bucket = normalized.get(record.id) ?? {};
       // Значение, которое встанет в поле, если предложение принять.
-      bucket[rule.field] = result.issues.some((found) => found.severity === 'error')
-        ? null
-        : result.value;
+      bucket[rule.field] = hasError ? null : result.value;
       normalized.set(record.id, bucket);
 
       for (const found of result.issues) {
@@ -232,7 +232,10 @@ export function buildChangeSet(
         });
       }
 
-      if (!result.changed) continue;
+      // Ошибка означает, что безопасного целевого значения нет. Даже если
+      // normalizer смог убрать часть мусора, такое изменение нельзя помещать
+      // в список применяемых действий.
+      if (hasError || !result.changed) continue;
 
       actions.push({
         kind: 'normalize',

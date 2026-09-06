@@ -56,6 +56,23 @@ describe('findDuplicate', () => {
     expect(findDuplicate(base, buildApplicationIndex([base, otherCompany]))).toBeNull();
   });
 
+  test('не считает одинаковый невалидный телефон признаком дубля', () => {
+    const first: ApplicationSummary = {
+      ...base,
+      companyName: 'Первая компания',
+      companyInn: '',
+      companyEmail: '',
+      companyPhone: 'ИНН 1234567890',
+    };
+    const second: ApplicationSummary = {
+      ...first,
+      id: 'ROW-200',
+      companyName: 'Вторая компания',
+    };
+
+    expect(findDuplicate(second, buildApplicationIndex([first, second]))).toBeNull();
+  });
+
   test('совпадение только по контакту даёт среднюю уверенность', () => {
     const sameContact: ApplicationSummary = {
       ...otherCompany,

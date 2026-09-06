@@ -40,6 +40,29 @@ describe('buildChangeSet', () => {
     expect(changeSet.summary.blocking).toBe(1);
   });
 
+  test('не создаёт применяемые действия для значений с ошибкой', () => {
+    const invalid: SourceRecord[] = [
+      {
+        id: 'ROW-BAD',
+        values: {
+          company_email: ' BAD @ invalid ',
+          requester_phone: 'ИНН 1234567890',
+        },
+      },
+    ];
+
+    const changeSet = buildChangeSet(invalid);
+
+    expect(changeSet.actions).toEqual([]);
+    expect(changeSet.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'company_email', code: 'INVALID_EMAIL' }),
+        expect.objectContaining({ field: 'requester_phone', code: 'BAD_PHONE' }),
+      ]),
+    );
+    expect(changeSet.summary.blocking).toBe(2);
+  });
+
   test('id набора и действий детерминированы', () => {
     expect(buildChangeSet(records).id).toBe(buildChangeSet(records).id);
     expect(buildChangeSet(records).sourceFingerprint).toBe(

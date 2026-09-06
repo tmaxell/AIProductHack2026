@@ -1,4 +1,10 @@
-import { normalizeCity, normalizeEmail, normalizeInn, normalizePhone } from '../normalize/index.js';
+import {
+  normalizeCity,
+  normalizeEmail,
+  normalizeInn,
+  normalizePhone,
+  type NormalizationResult,
+} from '../normalize/index.js';
 import type { CompanyReference } from './types.js';
 
 /**
@@ -24,13 +30,20 @@ export function companyNameKey(raw: string): string {
     .replace(/\s+/g, ' ');
 }
 
-function key(normalized: { value: string | null }): string | null {
+function key(normalized: NormalizationResult): string | null {
+  if (normalized.issues.some((found) => found.severity === 'error')) return null;
   return normalized.value !== null && normalized.value !== '' ? normalized.value : null;
+}
+
+/** Телефон с любым замечанием нельзя использовать как идентифицирующий ключ. */
+function phoneMatchKey(normalized: NormalizationResult): string | null {
+  if (normalized.issues.length > 0) return null;
+  return key(normalized);
 }
 
 export const innKey = (raw: string): string | null => key(normalizeInn(raw));
 export const emailKey = (raw: string): string | null => key(normalizeEmail(raw));
-export const phoneKey = (raw: string): string | null => key(normalizePhone(raw));
+export const phoneKey = (raw: string): string | null => phoneMatchKey(normalizePhone(raw));
 export const cityKey = (raw: string): string | null => {
   const city = key(normalizeCity(raw));
   return city === null ? null : foldYo(city).toLowerCase();

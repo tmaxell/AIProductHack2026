@@ -97,6 +97,25 @@ describe('matchCompany', () => {
     expect(match({ name: 'Неизвестная Компания', inn: '5000000000' }).kind).toBe('none');
   });
 
+  test('не использует невалидный телефон как ключ сопоставления', () => {
+    const invalidPhone: CompanyReference = {
+      ...romashka,
+      id: 'CMP-BAD-PHONE',
+      legalName: '',
+      shortName: '',
+      aliases: [],
+      inn: '',
+      email: '',
+      phone: 'ИНН 1234567890',
+    };
+    const outcome = matchCompany(
+      toQuery({ phone: 'ИНН 1234567890' }),
+      buildCompanyIndex([invalidPhone]),
+    );
+
+    expect(outcome.kind).toBe('none');
+  });
+
   test('несколько равных кандидатов не разрешаются автоматически', () => {
     const twin: CompanyReference = { ...romashka, id: 'CMP-3', inn: '7700000000' };
     const outcome = matchCompany(
