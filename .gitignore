@@ -30,6 +30,7 @@ __pycache__/
 tmp/
 temp/
 .tmp/
+solution/devtools/reports/
 
 # Generated data: keep only its policy file
 data/derived/*
