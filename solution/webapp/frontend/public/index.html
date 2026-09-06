@@ -287,6 +287,27 @@
   </div>
 </div>
 
+<!-- ============ EXPLICIT AI CONSENT + RESULT MODAL ============ -->
+<div class="modal-overlay" id="aiModal">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="aiTitle">
+    <header class="m-head">
+      <div>
+        <h2 class="m-title" id="aiTitle">AI-объяснение</h2>
+        <p class="settings-hint">Groq объясняет изменения, но не может их применить или опубликовать.</p>
+      </div>
+      <button class="icon-btn" onclick="closeAiExplanation()" aria-label="Закрыть AI-объяснение">
+        <svg class="ic"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="m-body" id="aiBody"></div>
+    <footer class="m-foot">
+      <span class="spacer"></span>
+      <button class="btn-ghost" onclick="closeAiExplanation()">Закрыть</button>
+      <button class="btn-primary" id="aiSendBtn" onclick="requestAiExplanation()" disabled>Отправить в Groq</button>
+    </footer>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="data.js"></script>

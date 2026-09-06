@@ -326,6 +326,8 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .version-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
 .version-detail-head h3 { margin: 0 0 4px; font-size: 16px; }
 .version-actions { display: flex; gap: 8px; }
+.version-actions { flex-wrap: wrap; justify-content: flex-end; }
+.ai-button { color: var(--purple); border-color: #CFC3FF; }
 .compare-control { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--text-muted); }
 .compare-control select { min-width: 190px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .diff-summary { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -336,6 +338,20 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .version-events div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .version-events div:last-child { border-bottom: 0; }
 .version-events span { color: var(--text-muted); font-size: 12px; }
+.ai-consent { padding: 12px; border: 1px solid #CFC3FF; border-radius: var(--r-card); background: #F8F6FF; }
+.ai-consent > p { margin: 5px 0 12px; color: var(--text-muted); line-height: 1.5; }
+.ai-disclosure { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; margin: 7px 0; font-size: 12px; }
+.ai-disclosure span, .ai-result-meta { color: var(--text-muted); }
+.ai-preview-table { min-width: 600px; }
+.ai-history-title { margin-top: 18px; }
+.ai-result { border: 1px solid var(--border); border-radius: var(--r-card); padding: 14px; }
+.ai-result-meta { font-size: 11px; margin-bottom: 7px; }
+.ai-summary { font-weight: 600; line-height: 1.5; margin-bottom: 12px; }
+.ai-section { margin-top: 12px; }
+.ai-section h3 { font-size: 12px; margin-bottom: 5px; }
+.ai-section ul { margin: 0; padding-left: 20px; line-height: 1.5; }
+.ai-error { border: 1px solid var(--red-border); border-radius: var(--r-card); background: var(--red-light); padding: 12px; color: var(--red); }
+.ai-error p { margin-top: 5px; }
 .btn-primary:disabled:hover { background: #B9A9F7; }
 
 .block-label { font-size: 12px; color: var(--text-muted); margin: 4px 0 8px; }

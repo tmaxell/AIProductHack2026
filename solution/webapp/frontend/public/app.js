@@ -799,6 +799,8 @@ function applyFromReport() {
 
 let versionItems = [];
 let selectedVersionId = null;
+let explanationVersionId = null;
+let explanationActionIds = [];
 
 const VERSION_STATUS = {
   draft: 'Draft',
@@ -862,12 +864,15 @@ async function renderVersions() {
     '<td class="cell-to">' + escapeHtml(action.editedAfter !== undefined ? action.editedAfter : (action.after || '—')) + '</td>' +
     '<td>' + escapeHtml(action.decision) + ' / ' + escapeHtml(action.result) + '</td></tr>'
   ).join('');
-  const buttons = version.status === 'draft'
+  const aiButton = version.actions.length
+    ? '<button class="btn-ghost ai-button" onclick="openAiExplanation(\'' + version.id + '\')">AI-объяснение</button>'
+    : '';
+  const buttons = aiButton + (version.status === 'draft'
     ? '<button class="btn-ghost" onclick="discardVersion(\'' + version.id + '\')">Отбросить</button>' +
       '<button class="btn-primary" onclick="continueVersion(\'' + version.id + '\')">Продолжить draft</button>'
     : (version.status === 'published' || version.status === 'superseded')
       ? '<button class="btn-primary" onclick="rollbackVersion(\'' + version.id + '\')">Подготовить откат</button>'
-      : '';
+      : '');
 
   document.getElementById('versionDetails').innerHTML =
     '<div class="version-detail-head"><div><h3>' + escapeHtml(versionTitle(version)) + '</h3>' +
@@ -937,6 +942,100 @@ async function rollbackVersion(id) {
   }
 }
 
+function renderExplanationList(title, items) {
+  if (!items.length) return '';
+  return '<section class="ai-section"><h3>' + escapeHtml(title) + '</h3><ul>' +
+    items.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></section>';
+}
+
+function renderExplanationResult(attempt) {
+  if (!attempt) return '<p class="text-muted">Для этой версии объяснений ещё нет.</p>';
+  if (attempt.status === 'failed') {
+    return '<div class="ai-error"><b>Последняя попытка не удалась</b><p>' +
+      escapeHtml(attempt.errorMessage || 'Groq недоступен') + '</p></div>';
+  }
+  if (!attempt.response) return '<p class="text-muted">Объяснение готовится…</p>';
+  const output = attempt.response;
+  return '<article class="ai-result"><div class="ai-result-meta">' + escapeHtml(attempt.model) +
+    ' · ' + escapeHtml(attempt.promptVersion) + '</div><p class="ai-summary">' + escapeHtml(output.summary) + '</p>' +
+    renderExplanationList('Основания', output.evidence) +
+    renderExplanationList('Риски и противоречия', output.risks) +
+    renderExplanationList('Открытые вопросы', output.openQuestions) +
+    renderExplanationList('Рекомендуемые действия', output.recommendedActions) + '</article>';
+}
+
+async function openAiExplanation(id) {
+  const version = versionItems.find(item => item.id === id);
+  if (!version) return;
+  explanationVersionId = id;
+  const accepted = version.actions.filter(action => action.decision === 'accepted');
+  const selected = accepted.length ? accepted : version.actions.filter(action => action.decision !== 'rejected');
+  explanationActionIds = selected.map(action => action.id);
+  if (!explanationActionIds.length) {
+    showToast('Нет выбранных действий для объяснения');
+    return;
+  }
+
+  document.getElementById('aiModal').classList.add('show');
+  document.getElementById('aiTitle').textContent = 'AI-объяснение · ' + versionTitle(version);
+  document.getElementById('aiBody').innerHTML = '<p class="text-muted">Готовим preview раскрытия данных…</p>';
+  document.getElementById('aiSendBtn').disabled = true;
+  try {
+    const [preview, history] = await Promise.all([
+      window.API.previewExplanation(id, explanationActionIds),
+      window.API.listExplanations(id)
+    ]);
+    const sample = preview.payload.actions.slice(0, 4).map(action =>
+      '<tr><td>' + escapeHtml(action.recordRef) + '</td><td>' + escapeHtml(action.field) + '</td>' +
+      '<td>' + escapeHtml(action.before == null ? '—' : action.before) + '</td><td>' +
+      escapeHtml(action.after == null ? '—' : action.after) + '</td></tr>'
+    ).join('');
+    document.getElementById('aiBody').innerHTML =
+      '<div class="ai-consent"><b>Что будет отправлено в Groq</b>' +
+      '<p>Только ' + preview.actionIds.length + ' выбранных действий сохранённой backend-версии. ' +
+      'Исходные строки и их идентификаторы не отправляются; персональные значения маскируются.</p>' +
+      '<div class="ai-disclosure"><span>Поля</span><b>' + escapeHtml(preview.fields.join(', ')) + '</b></div>' +
+      '<div class="ai-disclosure"><span>Модель</span><b>' + escapeHtml(preview.model || 'не настроена') + '</b></div>' +
+      '<div class="report-table-wrap"><table class="grid report-grid ai-preview-table"><thead><tr><th>Запись</th><th>Поле</th><th>Было</th><th>Стало</th></tr></thead><tbody>' + sample + '</tbody></table></div>' +
+      (preview.payload.actions.length > 4 ? '<p class="settings-hint">Показаны 4 действия из ' + preview.payload.actions.length + '.</p>' : '') +
+      '</div><div class="block-label ai-history-title">Последнее сохранённое объяснение</div>' +
+      renderExplanationResult(history.items[0]);
+    const button = document.getElementById('aiSendBtn');
+    button.disabled = !preview.available;
+    button.textContent = preview.available ? 'Отправить в Groq' : 'Groq не настроен';
+    if (!button.disabled) button.focus();
+  } catch (error) {
+    document.getElementById('aiBody').innerHTML = '<p class="settings-hint warn">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+async function requestAiExplanation() {
+  if (!explanationVersionId || !explanationActionIds.length) return;
+  const button = document.getElementById('aiSendBtn');
+  button.disabled = true;
+  button.textContent = 'Groq анализирует…';
+  try {
+    const attempt = await window.API.createExplanation(explanationVersionId, explanationActionIds);
+    const resultHost = document.createElement('div');
+    resultHost.innerHTML = '<div class="block-label ai-history-title">Новое объяснение</div>' + renderExplanationResult(attempt);
+    document.getElementById('aiBody').appendChild(resultHost);
+    button.textContent = 'Получить новое объяснение';
+    button.disabled = false;
+    showToast('AI-объяснение сохранено в истории версии');
+  } catch (error) {
+    button.textContent = 'Повторить отправку';
+    button.disabled = false;
+    showToast(error.message || 'Не удалось получить AI-объяснение');
+  }
+}
+
+function closeAiExplanation() {
+  document.getElementById('aiModal').classList.remove('show');
+  explanationVersionId = null;
+  explanationActionIds = [];
+  if (document.getElementById('versionsModal').classList.contains('show')) void renderVersions();
+}
+
 /* ---------- инициализация ---------- */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -949,7 +1048,8 @@ document.addEventListener('DOMContentLoaded', () => {
 const FOCUSABLE = 'button:not([disabled]):not([hidden]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 function trapFocus(e) {
-  const openModal = document.querySelector('.modal-overlay.show .modal');
+  const modals = document.querySelectorAll('.modal-overlay.show .modal');
+  const openModal = modals[modals.length - 1];
   if (!openModal) return;
   const items = Array.from(openModal.querySelectorAll(FOCUSABLE)).filter(el => el.offsetParent !== null);
   if (!items.length) return;
@@ -968,13 +1068,15 @@ function trapFocus(e) {
 }
 
 document.addEventListener('keydown', e => {
-  const openModal = document.querySelector('.modal-overlay.show');
+  const modals = document.querySelectorAll('.modal-overlay.show');
+  const openModal = modals[modals.length - 1];
   if (!openModal) return;
   if (e.key === 'Escape') {
     if (openModal.id === 'reportModal') closeReport();
     else if (openModal.id === 'settingsModal') closeSettings();
     else if (openModal.id === 'launchModal') closeLaunchReport();
     else if (openModal.id === 'versionsModal') closeVersions();
+    else if (openModal.id === 'aiModal') closeAiExplanation();
   } else if (e.key === 'Tab') {
     trapFocus(e);
   }

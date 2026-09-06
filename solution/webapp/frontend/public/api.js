@@ -20,7 +20,7 @@ const UNAVAILABLE = 'Сервис недоступен. Проверьте, чт
 
 async function request(path, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || TIMEOUT_MS);
 
   let response;
   try {
@@ -72,6 +72,17 @@ window.API = {
 
   getChangeSetHistory: (id) =>
     request('/change-sets/' + encodeURIComponent(id) + '/history'),
+
+  previewExplanation: (id, actionIds) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/explanation-preview', { actionIds }),
+
+  createExplanation: (id, actionIds) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/explanations', {
+      method: 'POST', body: { actionIds }, timeoutMs: 60000
+    }),
+
+  listExplanations: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/explanations'),
 
   publishChangeSet: (id, records) =>
     post('/change-sets/' + encodeURIComponent(id) + '/publish', { records }),
