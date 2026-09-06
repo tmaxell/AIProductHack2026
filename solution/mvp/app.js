@@ -396,7 +396,9 @@ function openReport() {
 function closeReport() {
   document.getElementById('reportModal').classList.remove('show');
   const primary = document.getElementById('primaryBtn');
+  const secondary = document.getElementById('secondaryBtn');
   if (!primary.hidden) primary.focus();
+  else if (!secondary.hidden && !secondary.disabled) secondary.focus();
 }
 
 function isReportOpen() {
@@ -454,6 +456,29 @@ document.addEventListener('DOMContentLoaded', () => {
   renderWidget();
 });
 
+/* Модалка удерживает фокус, пока открыта. */
+const FOCUSABLE = 'button:not([disabled]):not([hidden]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+function trapFocus(e) {
+  const modal = document.querySelector('#reportModal .modal');
+  const items = Array.from(modal.querySelectorAll(FOCUSABLE)).filter(el => el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  } else if (!modal.contains(document.activeElement)) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && isReportOpen()) closeReport();
+  if (!isReportOpen()) return;
+  if (e.key === 'Escape') closeReport();
+  else if (e.key === 'Tab') trapFocus(e);
 });
