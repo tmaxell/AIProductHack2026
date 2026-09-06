@@ -12,41 +12,30 @@
 <div class="topbar">
   <div class="ws-icon">9</div>
   <div class="ws-name">9279821549 station</div>
-  <span style="color:var(--text-muted);width:1px;height:22px;background:var(--border)"></span>
+  <span class="topbar-sep"></span>
   <div class="table-title">
     <span class="grid-ic">▦</span>
     дев выборка
-    <span class="desc">Добавить описание…</span>
   </div>
   <div class="spacer"></div>
-  <div class="actions">
-    <button class="btn-ghost">Представление в вид…</button>
-    <span style="color:var(--text-muted);font-size:13px">2 предст.</span>
-    <button class="btn-primary" onclick="openScriptModal()">▶ Выполнить скрипт</button>
-    <button class="icon-btn" title="Поделиться">🔗</button>
-    <button class="icon-btn" title="Настройки">⚙</button>
-  </div>
 </div>
 
 <!-- ============ LAYOUT ============ -->
 <div class="layout">
 
   <!-- Left icon rail -->
-  <div class="icon-rail">
+  <div class="icon-rail" aria-hidden="true">
     <div class="rail-ic active">🏠</div>
     <div class="rail-ic">👥</div>
     <div class="rail-ic">🌍</div>
     <div class="rail-ic">⚙</div>
-    <div class="rail-ic">🎓</div>
     <div class="rail-spacer"></div>
-    <div class="rail-ic">🔍</div>
-    <div class="rail-ic badge">🔔</div>
     <div class="rail-ic">❓</div>
     <div class="rail-ic">👤</div>
   </div>
 
   <!-- Left navigation -->
-  <div class="side-nav">
+  <div class="side-nav" aria-hidden="true">
     <div class="nav-tabs">
       <div class="nav-tab active">Проводник</div>
       <div class="nav-tab">Закрепить</div>
@@ -54,55 +43,43 @@
     <div class="nav-item"><span class="nav-ic">+</span>Добавить</div>
     <div class="nav-item"><span class="nav-ic">⇪</span>Импорт</div>
     <div class="nav-item"><span class="nav-ic">📁</span>Папка</div>
-    <div class="nav-label">Элементы</div>
-    <div class="nav-item"><span class="nav-ic">⚡</span>Новая автоматизация</div>
-    <div class="nav-item"><span class="nav-ic">ℹ</span>Новая интеграция</div>
-    <div class="nav-item"><span class="nav-ic">📄</span>Новая страница</div>
     <div class="folder-label">▾ Погружение</div>
     <div class="nav-item folder-item">📝 Новая форма 2</div>
     <div class="nav-item folder-item active">▦ дев выборка</div>
     <div class="nav-item folder-item">🔌 Новая интеграция</div>
     <div class="nav-item folder-item">📝 Новая форма</div>
-    <div class="add-btn nav-item"><span class="nav-ic">+</span>Новый дашборд</div>
   </div>
 
   <!-- ============ MAIN GRID ============ -->
   <div class="main">
     <div class="table-toolbar">
-      <div class="tool-group">
-        <button class="tool-btn" title="Отмена">↩</button>
-        <button class="tool-btn" title="Повтор">↪</button>
-        <button class="tool-btn" title="Добавить строку">＋</button>
-      </div>
-      <div class="tool-group">
-        <button class="tool-btn" title="Скрытые поля">👁</button>
-        <button class="tool-btn" title="Фильтр">⏳</button>
-        <button class="tool-btn" title="Виды">⊞</button>
-        <button class="tool-btn" title="Сортировка">⇅</button>
+      <div class="tool-group static">
+        <span class="tool-btn" title="Скрытые поля">👁</span>
+        <span class="tool-btn" title="Фильтр">⏳</span>
+        <span class="tool-btn" title="Группировка">⊞</span>
+        <span class="tool-btn" title="Сортировка">⇅</span>
       </div>
       <div class="tb-search">
-        <span style="color:var(--text-muted)">🔍</span>
-        <input id="searchInput" placeholder="Поиск…" oninput="onSearch(this.value)">
+        <span class="tb-search-ic">🔍</span>
+        <input id="searchInput" type="search" placeholder="Поиск…" aria-label="Поиск по заявкам" oninput="onSearch(this.value)">
       </div>
-      <button class="tool-btn" title="Дополнительно">⋮</button>
     </div>
 
     <div class="table-wrap">
       <table class="grid" id="gridTable">
         <thead>
           <tr>
-            <th style="width:44px"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
-            <th style="width:60px">#</th>
-            <th class="th-inner">application_id</th>
-            <th>project_name</th>
-            <th>company_name</th>
-            <th>company_city</th>
-            <th>budget</th>
-            <th>planned_start</th>
-            <th>planned_end</th>
-            <th>status</th>
-            <th>Качество</th>
-            <th>Валидация</th>
+            <th class="col-check"><input type="checkbox" id="checkAll" aria-label="Выбрать все заявки" onchange="toggleAll(this)"></th>
+            <th class="col-num">#</th>
+            <th>ID заявки</th>
+            <th>Название проекта</th>
+            <th>Компания</th>
+            <th>Город</th>
+            <th>Бюджет</th>
+            <th>Начало</th>
+            <th>Завершение</th>
+            <th>Статус</th>
+            <th>Проверка</th>
           </tr>
         </thead>
         <tbody id="gridBody"></tbody>
@@ -110,124 +87,64 @@
     </div>
 
     <div class="table-footer">
-      <span>＋ Добавить строку</span>
       <span id="rowCount"></span>
-      <button class="btn-ghost" style="padding:4px 10px;font-size:12px">Экспорт отчет</button>
     </div>
   </div>
 
   <!-- ============ WIDGET PANEL ============ -->
-  <div class="widget-panel" id="widgetPanel">
+  <aside class="widget-panel" id="widgetPanel" aria-label="Панель виджета">
     <div class="wp-header">
-      <span>Панель виджета</span>
-      <button class="close" onclick="toggleWidget()">×</button>
+      <span class="wp-title">Project Launch Copilot</span>
+      <button class="icon-btn" onclick="toggleWidget()" aria-label="Закрыть панель виджета">×</button>
     </div>
+
     <div class="wp-body">
-
-      <div class="script-block">
-        <div class="sb-head">
-          <span>🟣 Скрипт — Project Launch Copilot</span>
-          <span class="edit" onclick="openScriptModal()">Редактировать код ↗</span>
-        </div>
-        <div class="run-wrap">
-          <button class="btn-primary lg" onclick="runValidation()" id="runBtn">▶ Выполнить</button>
-        </div>
-        <div class="console" id="consoleBlock">
-          <div class="console-head" onclick="toggleConsole()">
-            <span>⌘ Консоль</span>
-            <span>▾/▸</span>
+      <!-- Состояние «до запуска» -->
+      <section id="widgetIntro">
+        <h2 class="wp-state-title">Проверка заявок</h2>
+        <p class="wp-state-sub">Найдём форматные ошибки и подготовим список изменений.</p>
+        <div class="source-card">
+          <div class="source-label">Источник</div>
+          <div class="source-row">
+            <span class="source-value">дев выборка</span>
+            <span class="source-count" id="sourceCount"></span>
           </div>
-          <div class="console-body" id="consoleBody"></div>
         </div>
-      </div>
+      </section>
 
-      <!-- Validation results: только результат + преобразования + кнопка Подробнее -->
-      <div id="validationSection" style="display:none">
-        <div class="section-title">Результат валидации</div>
-        <div class="val-banner" id="valBanner"></div>
-        <div style="margin-top:12px" id="summaryList"></div>
-        <div style="margin-top:12px" id="moreBtnWrap"></div>
-      </div>
-
+      <!-- Состояние «после запуска» -->
+      <section id="validationSection" hidden>
+        <h2 class="wp-state-title" id="resultTitle">Проверка завершена</h2>
+        <p class="wp-state-sub" id="resultSub"></p>
+        <div id="statusRows"></div>
+      </section>
     </div>
-  </div>
+
+    <div class="wp-actions">
+      <button class="btn-primary block" id="primaryBtn" onclick="runValidation()">Проверить данные</button>
+      <button class="btn-link" id="secondaryBtn" type="button" disabled>Настройки проверки</button>
+    </div>
+  </aside>
+
+  <button class="widget-reopen" id="widgetReopen" type="button" hidden onclick="toggleWidget()">Project Launch Copilot</button>
 </div>
 
-<!-- ============ SCRIPT MODAL (foto 2 style) ============ -->
-<div class="modal-overlay" id="scriptModal">
-  <div class="modal">
-    <div class="m-head">
-      <div class="m-title">Скрипт — Project Launch Copilot</div>
-      <div class="m-tools">
-        <button class="icon-btn">⚙</button>
-        <button class="icon-btn">⋮</button>
-        <button class="icon-btn">⧉</button>
-        <button class="icon-btn" onclick="closeScriptModal()">×</button>
-      </div>
-    </div>
-    <div class="m-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <button class="btn-ghost" onclick="alert('Редактор кода открыт в отдельной вкладке (mock)')">✎ Редактировать код</button>
-        <span style="color:var(--text-muted);font-size:12px">Widget Script · JS</span>
-      </div>
-      <div class="code-editor" id="codeView">
-<span class="k">const</span> <span class="f">LPC</span> = <span class="k">require</span>(<span class="s">'../widget-script'</span>);
-<span class="c">// Этап 2: Валидация и нормализация выбранных записей</span>
-<span class="k">const</span> table = <span class="k">await</span> base.getTable(<span class="s">'дев выборка'</span>);
-<span class="k">const</span> records = <span class="k">await</span> table.selectRecordsAsync();
-
-<span class="k">const</span> results = [];
-<span class="k">for</span> (<span class="k">const</span> rec <span class="k">of</span> records.records) {
-  <span class="k">const</span> row = {
-    company_email: rec.getCellValue(<span class="s">'company_email_raw'</span>),
-    company_phone: rec.getCellValue(<span class="s">'company_phone_raw'</span>),
-    company_inn:   rec.getCellValue(<span class="s">'company_inn_raw'</span>),
-    company_city:  rec.getCellValue(<span class="s">'company_city_raw'</span>),
-    requester_fio: rec.getCellValue(<span class="s">'requester_fio_raw'</span>),
-    budget:        rec.getCellValue(<span class="s">'budget_raw'</span>),
-    planned_start: rec.getCellValue(<span class="s">'planned_start_raw'</span>),
-    planned_end:   rec.getCellValue(<span class="s">'planned_end_raw'</span>)
-  };
-  <span class="k">const</span> res = <span class="f">LPC</span>.validateRow(row);
-  res.row_id = rec.id;
-  results.push(res);
-}
-
-<span class="c">// Вывод сводки (порог: 70% готовы, precision ≥90%, recall ≥80%)</span>
-<span class="k">const</span> okCount = results.filter(r =&gt; r.ok).length;
-<span class="k">const</span> total = results.length;
-<span class="f">console</span>.log(<span class="s">`Готово к запуску: ${okCount}/${total} (${(okCount/total*100).toFixed(1)}%)`</span>);
-<span class="f">console</span>.log(<span class="s">'Порог 70%: '</span> + (okCount/total &gt;= <span class="n">0.7</span> ? <span class="s">'ДОСТИГНУТ ✓'</span> : <span class="s">'не достигнут'</span>));
-      </div>
-    </div>
-    <div class="m-foot">
-      <button class="btn-ghost" onclick="closeScriptModal()">Отмена</button>
-      <button class="btn-primary" onclick="closeScriptModal();runValidation()">Выполнить</button>
-    </div>
-  </div>
-</div>
-
+<!-- ============ REPORT MODAL ============ -->
 <div class="modal-overlay" id="reportModal">
-  <div class="modal" style="width:860px">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
     <div class="m-head">
-      <div class="m-title" id="reportTitle">Полный отчёт по валидации</div>
-      <div class="m-tools">
-        <button class="icon-btn" onclick="closeReport()">×</button>
-      </div>
+      <div class="m-title" id="reportTitle">Изменения</div>
+      <button class="icon-btn" onclick="closeReport()" aria-label="Закрыть отчёт">×</button>
     </div>
     <div class="m-body">
-      <!-- Правило + пагинация -->
-      <div id="reportRuleBody" style="margin-bottom:14px"></div>
-
-      <div style="overflow:auto;max-height:46vh;border:1px solid var(--border);border-radius:10px">
-        <table class="grid" style="min-width:760px;font-size:12.5px">
+      <div id="reportRuleBody"></div>
+      <div class="report-table-wrap">
+        <table class="grid report-grid">
           <thead>
             <tr>
-              <th style="width:130px">Заявка</th>
-              <th style="width:44%">Было</th>
-              <th style="width:36px"></th>
-              <th style="width:44%">Стало</th>
-              <th>Причина</th>
+              <th class="col-app">Заявка</th>
+              <th>Было</th>
+              <th>Стало</th>
             </tr>
           </thead>
           <tbody id="reportTableBody"></tbody>
@@ -235,16 +152,19 @@
       </div>
     </div>
     <div class="m-foot">
-      <div style="display:flex;align-items:center;gap:10px;width:100%">
-        <button class="btn-ghost" onclick="applyFromReport()" id="reportApplyBtn">✓ Применить все нормализации</button>
-        <span style="flex:1"></span>
-        <button class="btn-ghost lg" id="reportPrev" onclick="reportPrev()">←</button>
-        <span style="font-size:13px;color:var(--text-muted);text-align:center" id="reportPageInfo">1 / 1</span>
-        <button class="btn-primary lg" id="reportNext" onclick="reportNext()">→</button>
+      <div class="pager">
+        <button class="icon-btn" id="reportPrev" onclick="reportPrev()" aria-label="Предыдущее правило">←</button>
+        <span class="pager-info" id="reportPageInfo">1 из 1</span>
+        <button class="icon-btn" id="reportNext" onclick="reportNext()" aria-label="Следующее правило">→</button>
       </div>
+      <span class="spacer"></span>
+      <button class="btn-ghost" onclick="closeReport()">Закрыть</button>
+      <button class="btn-primary" id="reportApplyBtn" onclick="applyFromReport()">Применить все</button>
     </div>
   </div>
 </div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="data.js"></script>
 <script src="widget-script.js"></script>
