@@ -121,9 +121,12 @@
   <aside class="widget-panel" id="widgetPanel" aria-label="Панель виджета">
     <header class="wp-header">
       <span class="wp-title">Project Launch Copilot</span>
-      <button class="icon-btn" onclick="toggleWidget()" aria-label="Свернуть панель виджета">
-        <svg class="ic"><use href="#i-close"/></svg>
-      </button>
+      <span class="wp-header-actions">
+        <button class="btn-link compact" type="button" onclick="openVersions()">Версии</button>
+        <button class="icon-btn" onclick="toggleWidget()" aria-label="Свернуть панель виджета">
+          <svg class="ic"><use href="#i-close"/></svg>
+        </button>
+      </span>
     </header>
 
     <div class="wp-body">
@@ -261,6 +264,29 @@
   </div>
 </div>
 
+<!-- ============ VERSION HISTORY MODAL ============ -->
+<div class="modal-overlay" id="versionsModal">
+  <div class="modal modal-versions" role="dialog" aria-modal="true" aria-labelledby="versionsTitle">
+    <header class="m-head">
+      <div>
+        <h2 class="m-title" id="versionsTitle">Версии Change Set</h2>
+        <p class="settings-hint">Draft, публикации и компенсирующие откаты хранятся в backend.</p>
+      </div>
+      <button class="icon-btn" onclick="closeVersions()" aria-label="Закрыть историю версий">
+        <svg class="ic"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div class="versions-layout">
+      <aside class="versions-list" id="versionsList" aria-label="Список версий"></aside>
+      <section class="version-details" id="versionDetails" aria-live="polite"></section>
+    </div>
+    <footer class="m-foot">
+      <span class="spacer"></span>
+      <button class="btn-ghost" onclick="closeVersions()">Закрыть</button>
+    </footer>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="data.js"></script>
@@ -270,6 +296,7 @@
 <script src="engine.js"></script>
 <script src="widget-script.js"></script>
 <script src="launch.js"></script>
+<script src="api.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -17,6 +17,7 @@ let reportRules = [];        // правила текущего отчёта
 let reportRuleIndex = 0;
 let acceptedChanges = new Set(); // подтверждённые пользователем предложения
 let lastRunSummary = null;   // {ok, total, duplicateClusters, duplicateMembers} из последнего прогона
+let activeChangeSet = null;  // сохранённая backend-версия — источник истины для publish
 
 // Снимок фактически применённых изменений: нужен, чтобы состояние
 // «применено» показывало реальные числа, а не результат повторной проверки.
@@ -53,6 +54,62 @@ function showToast(text) {
     el.classList.remove('show');
     setTimeout(() => { el.hidden = true; }, 200);
   }, 3200);
+}
+
+function toApiRecords(rows) {
+  return rows.map(row => {
+    const values = {};
+    FIELD_META.forEach(field => {
+      if (visibleColumns[field.key] !== false) values[field.key] = row[field.key] == null ? null : String(row[field.key]);
+    });
+    values.company_ref_id = row.company_ref_id || row.company_link || null;
+    values.duplicate_of = row.duplicate_of || row.duplicate_link || null;
+    return { id: row.row_id, values };
+  });
+}
+
+function applyApiRecords(apiRecords) {
+  apiRecords.forEach(apiRecord => {
+    const row = records.find(candidate => candidate.row_id === apiRecord.id);
+    if (!row) return;
+    Object.entries(apiRecord.values).forEach(([field, value]) => {
+      if (field === 'company_ref_id') row.company_link = value;
+      else if (field === 'duplicate_of') row.duplicate_link = value;
+      else row[field] = value;
+    });
+  });
+}
+
+function reportFromChangeSet(changeSet, acceptPending) {
+  activeChangeSet = changeSet;
+  const grouped = new Map();
+  changeSet.actions.forEach(action => {
+    const key = action.ruleCode;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        meta: { key, field: action.field, name: action.ruleName, reason: action.reason, group: action.group },
+        items: []
+      });
+    }
+    const row = records.find(candidate => candidate.row_id === action.recordId);
+    grouped.get(key).items.push({
+      id: action.id,
+      row_id: action.recordId,
+      application_id: row ? row.application_id : action.recordId,
+      field: action.field,
+      from: action.before,
+      to: action.editedAfter !== undefined ? action.editedAfter : action.after,
+      confidence: action.confidence,
+      evidence: action.evidence || [],
+      result: action.result
+    });
+  });
+  reportRules = Array.from(grouped.values());
+  acceptedChanges = new Set(
+    changeSet.actions
+      .filter(action => action.decision === 'accepted' || (acceptPending && action.decision === 'pending'))
+      .map(action => action.id)
+  );
 }
 
 /* ---------- область запуска (шаг 1 сценария: "выбрать исходные записи") ---------- */
@@ -504,11 +561,11 @@ function renderWidget() {
   const rows = document.getElementById('statusRows');
 
   if (applyMode) {
-    title.textContent = 'Изменения применены';
+    title.textContent = 'Версия опубликована';
     sub.textContent = appliedChangeCount + ' ' + changesWord(appliedChangeCount) + ' в ' +
       appliedRecordCount + ' ' + pluralRu(appliedRecordCount, 'записи', 'записях', 'записях');
     rows.innerHTML = '<div class="block-label">Что изменено</div>' + ruleList(appliedSnapshot) + disabledFieldsBanner() + launchReportLink();
-    setActions(null, { label: 'Отменить изменения', variant: 'ghost', onClick: resetNormalizations });
+    setActions(null, { label: 'Подготовить откат', variant: 'ghost', onClick: prepareRollback });
     return;
   }
 
@@ -543,76 +600,86 @@ function renderWidget() {
    состояние «выполняется» успело отрисоваться и не мигало. */
 const RUN_MIN_MS = 400;
 
-function runValidation() {
+async function runValidation() {
   if (isRunning) return;
   scope = getScope(); // фиксируем область именно на момент запуска
   isRunning = true;
   renderWidget();
-  setTimeout(() => {
+  try {
+    const parentId = activeChangeSet ? activeChangeSet.id : undefined;
+    const draftPromise = window.API.createChangeSet(toApiRecords(scope), parentId);
+    await Promise.all([
+      draftPromise.then(draft => { reportFromChangeSet(draft, true); }),
+      new Promise(resolve => setTimeout(resolve, RUN_MIN_MS))
+    ]);
     applyMode = false;
     hasRun = true;
     validateAll();
-    reportRules = collectRuleChanges();
-    acceptedChanges = new Set(reportRules.flatMap(rule => rule.items.map(change => change.id)));
+  } catch (error) {
+    reportRules = [];
+    showToast(error.message || 'Не удалось сохранить draft');
+  } finally {
     isRunning = false;
     renderTable();
     renderWidget();
-  }, RUN_MIN_MS);
+  }
 }
 
 /* ---------- применение и откат ---------- */
 
-function applyNormalizations() {
+async function applyNormalizations() {
+  if (!activeChangeSet || activeChangeSet.status !== 'draft') return;
+  const decisions = activeChangeSet.actions.map(action => ({
+    actionId: action.id,
+    decision: acceptedChanges.has(action.id) ? 'accepted' : 'rejected'
+  }));
+  const button = document.getElementById('reportApplyBtn');
+  button.disabled = true;
+  button.textContent = 'Публикуем…';
+
+  try {
+    activeChangeSet = await window.API.saveDecisions(activeChangeSet.id, decisions);
+    const outcome = await window.API.publishChangeSet(activeChangeSet.id, toApiRecords(scope));
+    activeChangeSet = outcome.changeSet;
+    applyApiRecords(outcome.records);
+
   appliedSnapshot = reportRules
     .map(rule => ({ ...rule, items: rule.items.filter(change => acceptedChanges.has(change.id)) }))
     .filter(rule => rule.items.length > 0);
-  const touched = new Set();
-  let applied = 0;
-
-  scope.forEach(row => {
-    (row._validationChanges || []).forEach(c => {
-      const id = row.row_id + '::' + c.field;
-      const selected = c.hidden
-        ? c.field === 'duplicate_group_id' && acceptedChanges.has(row.row_id + '::duplicate_link')
-        : acceptedChanges.has(id);
-      if (!selected) return;
-      if (row[c.field] === c.to) return;
-      row._prevValues = row._prevValues || {};
-      if (!(c.field in row._prevValues)) row._prevValues[c.field] = c.from;
-      row[c.field] = c.to;
-      touched.add(row.row_id);
-      if (!c.hidden) applied++;
-    });
-  });
-
-  appliedChangeCount = applied;
-  appliedRecordCount = touched.size;
+    const appliedActions = activeChangeSet.actions.filter(action => action.result === 'applied');
+    appliedChangeCount = appliedActions.length;
+    appliedRecordCount = new Set(appliedActions.map(action => action.recordId)).size;
   applyMode = true;
 
-  // Пересчёт после применения показывает, что повторный запуск идемпотентен.
-  validateAll();
-  reportRules = appliedSnapshot;
-  renderTable();
-  renderWidget();
-  showToast('Применено ' + applied + ' ' + changesWord(applied) + ' в ' + touched.size + ' ' + recordsWord(touched.size));
+    validateAll();
+    reportRules = appliedSnapshot;
+    closeReport();
+    renderTable();
+    renderWidget();
+    showToast(
+      (outcome.idempotent ? 'Версия уже была опубликована: ' : 'Опубликовано ') +
+      appliedChangeCount + ' ' + changesWord(appliedChangeCount)
+    );
+  } catch (error) {
+    activeChangeSet = await window.API.getChangeSet(activeChangeSet.id).catch(() => activeChangeSet);
+    showToast(error.message || 'Не удалось опубликовать версию');
+    renderReportPage();
+  } finally {
+    button.disabled = false;
+  }
 }
 
-function resetNormalizations() {
-  scope.forEach(row => {
-    if (!row._prevValues) return;
-    Object.keys(row._prevValues).forEach(f => { row[f] = row._prevValues[f]; });
-    delete row._prevValues;
-  });
-  applyMode = false;
-  appliedSnapshot = [];
-  appliedChangeCount = 0;
-  appliedRecordCount = 0;
-  validateAll();
-  reportRules = collectRuleChanges();
-  acceptedChanges = new Set(reportRules.flatMap(rule => rule.items.map(change => change.id)));
-  renderTable();
-  renderWidget();
-  showToast('Изменения отменены, значения возвращены к исходным');
+async function prepareRollback() {
+  if (!activeChangeSet || !['published', 'superseded'].includes(activeChangeSet.status)) return;
+  try {
+    const rollback = await window.API.createRollback(activeChangeSet.id, toApiRecords(scope));
+    reportFromChangeSet(rollback, true);
+    applyMode = false;
+    openReport();
+    showToast('Rollback сохранён как Draft #' + rollback.sequence + ' и требует подтверждения');
+  } catch (error) {
+    showToast(error.message || 'Не удалось подготовить откат');
+  }
 }
 
 /* ---------- отчёт «было → стало» ---------- */
@@ -651,7 +718,7 @@ function renderReportFooter() {
   const button = document.getElementById('reportApplyBtn');
   button.hidden = applyMode;
   button.disabled = selected === 0;
-  button.textContent = selected ? 'Применить ' + selected : 'Применить';
+  button.textContent = selected ? 'Опубликовать ' + selected : 'Опубликовать';
 }
 
 function closeReport() {
@@ -697,9 +764,12 @@ function renderReportPage() {
   rule.items.forEach(ch => {
     const tr = document.createElement('tr');
     if (!acceptedChanges.has(ch.id)) tr.classList.add('declined');
+    const confidenceLabels = { high: 'высокая', medium: 'средняя', low: 'низкая' };
     const confTitle = (ch.confidence === null || ch.confidence === undefined)
       ? ''
-      : ' (уверенность движка ' + Math.round(ch.confidence * 100) + '%)';
+      : typeof ch.confidence === 'number'
+        ? ' (уверенность движка ' + Math.round(ch.confidence * 100) + '%)'
+        : ' (уверенность: ' + (confidenceLabels[ch.confidence] || ch.confidence) + ')';
     const toShown = ch.toDisplay || ch.to;
     tr.innerHTML =
       '<td class="col-check"><input type="checkbox" ' + (acceptedChanges.has(ch.id) ? 'checked ' : '') +
@@ -722,8 +792,146 @@ function reportPrev() { if (reportRuleIndex > 0) { reportRuleIndex--; renderRepo
 function reportNext() { if (reportRuleIndex < reportRules.length - 1) { reportRuleIndex++; renderReportPage(); } }
 
 function applyFromReport() {
-  closeReport();
-  applyNormalizations();
+  void applyNormalizations();
+}
+
+/* ---------- версии, история и diff ---------- */
+
+let versionItems = [];
+let selectedVersionId = null;
+
+const VERSION_STATUS = {
+  draft: 'Draft',
+  published: 'Опубликована',
+  superseded: 'Заменена',
+  discarded: 'Отброшена'
+};
+
+function versionTitle(version) {
+  return (version.rollbackOfId ? 'Rollback Draft #' : 'Draft #') + version.sequence;
+}
+
+async function openVersions() {
+  document.getElementById('versionsModal').classList.add('show');
+  document.getElementById('versionsList').innerHTML = '<p class="text-muted">Загружаем историю…</p>';
+  try {
+    const response = await window.API.listChangeSets();
+    versionItems = response.items;
+    selectedVersionId = activeChangeSet ? activeChangeSet.id : (versionItems[0] && versionItems[0].id);
+    await renderVersions();
+  } catch (error) {
+    document.getElementById('versionsList').innerHTML = '<p class="settings-hint warn">' + escapeHtml(error.message) + '</p>';
+  }
+}
+
+function closeVersions() {
+  document.getElementById('versionsModal').classList.remove('show');
+}
+
+async function selectVersion(id) {
+  selectedVersionId = id;
+  await renderVersions();
+}
+
+async function renderVersions() {
+  const list = document.getElementById('versionsList');
+  if (!versionItems.length) {
+    list.innerHTML = '<p class="text-muted">Версий пока нет. Запустите проверку данных.</p>';
+    document.getElementById('versionDetails').innerHTML = '';
+    return;
+  }
+  list.innerHTML = versionItems.map(version =>
+    '<button type="button" class="version-item ' + (version.id === selectedVersionId ? 'active' : '') + '" ' +
+      'onclick="selectVersion(\'' + version.id + '\')">' +
+      '<span><b>' + escapeHtml(versionTitle(version)) + '</b><small>' +
+        new Date(version.createdAt).toLocaleString('ru-RU') + '</small></span>' +
+      '<span class="version-status status-' + version.status + '">' + escapeHtml(VERSION_STATUS[version.status]) + '</span>' +
+    '</button>'
+  ).join('');
+
+  const version = versionItems.find(item => item.id === selectedVersionId) || versionItems[0];
+  selectedVersionId = version.id;
+  const history = await window.API.getChangeSetHistory(version.id);
+  const others = versionItems.filter(item => item.id !== version.id);
+  const actions = version.actions.slice(0, 12).map(action =>
+    '<tr><td>' + escapeHtml(action.recordId) + '</td><td>' + escapeHtml(action.ruleName) + '</td>' +
+    '<td class="cell-from">' + escapeHtml(action.before || '—') + '</td>' +
+    '<td class="cell-to">' + escapeHtml(action.editedAfter !== undefined ? action.editedAfter : (action.after || '—')) + '</td>' +
+    '<td>' + escapeHtml(action.decision) + ' / ' + escapeHtml(action.result) + '</td></tr>'
+  ).join('');
+  const buttons = version.status === 'draft'
+    ? '<button class="btn-ghost" onclick="discardVersion(\'' + version.id + '\')">Отбросить</button>' +
+      '<button class="btn-primary" onclick="continueVersion(\'' + version.id + '\')">Продолжить draft</button>'
+    : (version.status === 'published' || version.status === 'superseded')
+      ? '<button class="btn-primary" onclick="rollbackVersion(\'' + version.id + '\')">Подготовить откат</button>'
+      : '';
+
+  document.getElementById('versionDetails').innerHTML =
+    '<div class="version-detail-head"><div><h3>' + escapeHtml(versionTitle(version)) + '</h3>' +
+      '<p class="text-muted">' + escapeHtml(VERSION_STATUS[version.status]) + ' · ' + version.summary.actions + ' ' + changesWord(version.summary.actions) + '</p></div>' +
+      '<div class="version-actions">' + buttons + '</div></div>' +
+    (others.length ? '<label class="compare-control">Сравнить с <select id="compareVersionSelect">' +
+      '<option value="">Выберите версию</option>' + others.map(item => '<option value="' + item.id + '">#' + item.sequence + ' · ' + VERSION_STATUS[item.status] + '</option>').join('') +
+      '</select><button class="btn-ghost" onclick="compareSelectedVersion()">Сравнить</button></label>' : '') +
+    '<div id="versionDiff"></div>' +
+    '<div class="report-table-wrap"><table class="grid report-grid version-grid"><thead><tr><th>Запись</th><th>Правило</th><th>Было</th><th>Стало</th><th>Решение / результат</th></tr></thead>' +
+      '<tbody>' + (actions || '<tr><td colspan="5">Действий нет</td></tr>') + '</tbody></table></div>' +
+    (version.actions.length > 12 ? '<p class="settings-hint">Показаны первые 12 действий из ' + version.actions.length + '.</p>' : '') +
+    '<div class="block-label version-history-title">История</div><div class="version-events">' +
+      history.items.map(event => '<div><b>' + escapeHtml(event.type) + '</b><span>' + new Date(event.createdAt).toLocaleString('ru-RU') + '</span></div>').join('') +
+    '</div>';
+}
+
+async function compareSelectedVersion() {
+  const against = document.getElementById('compareVersionSelect').value;
+  if (!against || !selectedVersionId) return;
+  try {
+    const diff = await window.API.compareChangeSets(selectedVersionId, against);
+    document.getElementById('versionDiff').innerHTML =
+      '<div class="diff-summary"><span>Добавлено <b>' + diff.added.length + '</b></span>' +
+      '<span>Удалено <b>' + diff.removed.length + '</b></span>' +
+      '<span>Изменено <b>' + diff.changed.length + '</b></span></div>';
+  } catch (error) {
+    showToast(error.message || 'Не удалось сравнить версии');
+  }
+}
+
+async function continueVersion(id) {
+  try {
+    const version = await window.API.getChangeSet(id);
+    reportFromChangeSet(version, false);
+    applyMode = false;
+    closeVersions();
+    openReport();
+  } catch (error) {
+    showToast(error.message || 'Не удалось открыть draft');
+  }
+}
+
+async function discardVersion(id) {
+  try {
+    await window.API.discardChangeSet(id);
+    const response = await window.API.listChangeSets();
+    versionItems = response.items;
+    await renderVersions();
+    showToast('Draft отброшен, история сохранена');
+  } catch (error) {
+    showToast(error.message || 'Не удалось отбросить draft');
+  }
+}
+
+async function rollbackVersion(id) {
+  try {
+    scope = getScope();
+    const rollback = await window.API.createRollback(id, toApiRecords(scope));
+    reportFromChangeSet(rollback, true);
+    applyMode = false;
+    closeVersions();
+    openReport();
+    showToast('Rollback сохранён как Draft #' + rollback.sequence);
+  } catch (error) {
+    showToast(error.message || 'Не удалось подготовить откат');
+  }
 }
 
 /* ---------- инициализация ---------- */
@@ -763,6 +971,7 @@ document.addEventListener('keydown', e => {
     if (openModal.id === 'reportModal') closeReport();
     else if (openModal.id === 'settingsModal') closeSettings();
     else if (openModal.id === 'launchModal') closeLaunchReport();
+    else if (openModal.id === 'versionsModal') closeVersions();
   } else if (e.key === 'Tab') {
     trapFocus(e);
   }

@@ -270,6 +270,8 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
   border-bottom: 1px solid var(--border);
 }
 .wp-title { font-weight: 600; font-size: 14px; }
+.wp-header-actions { display: flex; align-items: center; gap: 4px; }
+.btn-link.compact { padding: 5px 7px; width: auto; }
 .wp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 16px; }
 
 .wp-state-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
@@ -302,6 +304,38 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
 .btn-primary:disabled { background: #B9A9F7; cursor: default; }
+
+/* ============ ВЕРСИИ CHANGE SET ============ */
+.modal-versions { width: min(1120px, 96vw); height: min(760px, 90vh); }
+.versions-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); flex: 1; min-height: 0; }
+.versions-list { overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); background: var(--bg-work); }
+.version-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 10px; margin-bottom: 7px; text-align: left;
+  color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--r-card); cursor: pointer; font: inherit;
+}
+.version-item:hover, .version-item.active { border-color: var(--purple); background: #F7F4FF; }
+.version-item span:first-child { min-width: 0; }
+.version-item small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; }
+.version-status { flex: none; padding: 3px 6px; border-radius: 10px; font-size: 10px; background: var(--bg-work); }
+.version-status.status-published { color: #137A47; background: #EAF8F0; }
+.version-status.status-draft { color: var(--purple); background: #EFEAFF; }
+.version-status.status-discarded, .version-status.status-superseded { color: var(--text-muted); }
+.version-details { min-width: 0; overflow-y: auto; padding: 16px 18px; }
+.version-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.version-detail-head h3 { margin: 0 0 4px; font-size: 16px; }
+.version-actions { display: flex; gap: 8px; }
+.compare-control { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--text-muted); }
+.compare-control select { min-width: 190px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.diff-summary { display: flex; gap: 8px; margin-bottom: 12px; }
+.diff-summary span { padding: 7px 10px; border-radius: var(--r-card); background: var(--bg-work); }
+.version-grid { min-width: 720px; }
+.version-history-title { margin-top: 16px; }
+.version-events { border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }
+.version-events div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.version-events div:last-child { border-bottom: 0; }
+.version-events span { color: var(--text-muted); font-size: 12px; }
 .btn-primary:disabled:hover { background: #B9A9F7; }
 
 .block-label { font-size: 12px; color: var(--text-muted); margin: 4px 0 8px; }
@@ -425,6 +459,7 @@ table.report-grid td { max-width: 320px; }
 }
 @media (max-width: 980px) {
   .side-nav { display: none; }
+  .versions-layout { grid-template-columns: 210px minmax(0, 1fr); }
 }
 @media (max-height: 640px) {
   .wp-body { padding: 14px 16px; }

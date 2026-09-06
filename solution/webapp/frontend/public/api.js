@@ -18,16 +18,16 @@ class ApiError extends Error {
 
 const UNAVAILABLE = 'Сервис недоступен. Проверьте, что backend запущен.';
 
-async function post(path, body) {
+async function request(path, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   let response;
   try {
     response = await fetch(API_BASE + path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      method: options.method || 'GET',
+      headers: options.body === undefined ? undefined : { 'content-type': 'application/json' },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
     });
   } catch (cause) {
@@ -50,11 +50,36 @@ async function post(path, body) {
   return payload;
 }
 
+function post(path, body) { return request(path, { method: 'POST', body }); }
+function patch(path, body) { return request(path, { method: 'PATCH', body }); }
+
 window.API = {
   ApiError,
 
   /** Черновик набора изменений. Ничего не изменяет. */
-  createChangeSet: (records) => post('/change-sets', { records }),
+  createChangeSet: (records, parentId) =>
+    post('/change-sets', { records, ...(parentId ? { parentId } : {}) }),
+
+  listChangeSets: (status) => request('/change-sets' + (status ? '?status=' + encodeURIComponent(status) : '')),
+
+  getChangeSet: (id) => request('/change-sets/' + encodeURIComponent(id)),
+
+  saveDecisions: (id, actions) =>
+    patch('/change-sets/' + encodeURIComponent(id) + '/decisions', { actions }),
+
+  compareChangeSets: (id, against) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/diff?against=' + encodeURIComponent(against)),
+
+  getChangeSetHistory: (id) =>
+    request('/change-sets/' + encodeURIComponent(id) + '/history'),
+
+  publishChangeSet: (id, records) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/publish', { records }),
+
+  createRollback: (id, records) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/rollback', { records }),
+
+  discardChangeSet: (id) => post('/change-sets/' + encodeURIComponent(id) + '/discard'),
 
   /** Применение только подтверждённых действий. */
   applyChangeSet: (records, sourceFingerprint, actionIds) =>
