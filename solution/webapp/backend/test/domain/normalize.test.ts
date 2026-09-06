@@ -144,6 +144,36 @@ describe('city', () => {
     expect(normalizeCity('Гагарин')).toMatchObject({ value: 'Гагарин', changed: false });
   });
 
+  // Регистр приводится к каноническому написанию из словаря городов.
+  test('приводит регистр к каноническому', () => {
+    expect(normalizeCity('ИЖЕВСК')).toMatchObject({ value: 'Ижевск', changed: true });
+    expect(normalizeCity('ижевск')).toMatchObject({ value: 'Ижевск', changed: true });
+    expect(normalizeCity('Ижевск')).toMatchObject({ changed: false });
+  });
+
+  test('разворачивает транслитерацию известных городов', () => {
+    expect(normalizeCity('Tomsk')).toMatchObject({ value: 'Томск', changed: true });
+    expect(normalizeCity('TOMSK')).toMatchObject({ value: 'Томск' });
+    expect(normalizeCity('Ekaterinburg')).toMatchObject({ value: 'Екатеринбург' });
+  });
+
+  test('понимает английские экзонимы', () => {
+    expect(normalizeCity('Moscow')).toMatchObject({ value: 'Москва' });
+    expect(normalizeCity('ST. PETERSBURG')).toMatchObject({ value: 'Санкт-Петербург' });
+    expect(normalizeCity('Rostov-on-Don')).toMatchObject({ value: 'Ростов-на-Дону' });
+  });
+
+  test('частицы в составном названии остаются строчными', () => {
+    expect(normalizeCity('РОСТОВ-НА-ДОНУ')).toMatchObject({ value: 'Ростов-на-Дону' });
+    expect(normalizeCity('НИЖНИЙ НОВГОРОД')).toMatchObject({ value: 'Нижний Новгород' });
+  });
+
+  test('незнакомому городу канон не выдумывается', () => {
+    // Регистр поправить можно, а кириллический вариант — нет.
+    expect(normalizeCity('ГОРОДЕЦ')).toMatchObject({ value: 'Городец' });
+    expect(codes(normalizeCity('Metropolis'))).toContain('UNRECOGNIZED_CITY');
+  });
+
   test('разворачивает известные сокращения и латиницу', () => {
     expect(normalizeCity('Нск')).toMatchObject({ value: 'Новосибирск' });
     expect(normalizeCity('Vladivostok')).toMatchObject({ value: 'Владивосток' });
@@ -152,17 +182,24 @@ describe('city', () => {
   test('начинает название города с прописной буквы', () => {
     expect(normalizeCity('калининград')).toMatchObject({ value: 'Калининград', changed: true });
     expect(normalizeCity('г. краснодар')).toMatchObject({ value: 'Краснодар', changed: true });
-    expect(normalizeCity('нижний новгород')).toMatchObject({ value: 'Нижний новгород' });
+    // Составное название берётся из словаря целиком, а не капитализируется
+    // по первому слову: раньше здесь получалось «Нижний новгород».
+    expect(normalizeCity('нижний новгород')).toMatchObject({ value: 'Нижний Новгород' });
     expect(normalizeCity('Ростов-на-Дону')).toMatchObject({
       value: 'Ростов-на-Дону',
       changed: false,
     });
   });
 
-  test('неизвестная латиница остаётся, но помечается замечанием', () => {
-    const result = normalizeCity('Metropolis');
-    expect(result.value).toBe('Metropolis');
-    expect(codes(result)).toContain('LATIN_CITY');
+  test('неизвестный город остаётся, но помечается для разбора', () => {
+    // Опечатки, смешанный алфавит и сокращения детерминированно не чинятся.
+    expect(normalizeCity('Metropolis')).toMatchObject({ value: 'Metropolis' });
+    expect(codes(normalizeCity('Metropolis'))).toContain('UNRECOGNIZED_CITY');
+    expect(codes(normalizeCity('Челябинкс'))).toContain('UNRECOGNIZED_CITY');
+    expect(codes(normalizeCity('С-Пб'))).toContain('UNRECOGNIZED_CITY');
+    // Узнанный город замечаний не даёт.
+    expect(codes(normalizeCity('Tomsk'))).toEqual([]);
+    expect(codes(normalizeCity('ИЖЕВСК'))).toEqual([]);
   });
 });
 
@@ -176,6 +213,14 @@ describe('fio', () => {
 
   test('сохраняет инициалы', () => {
     expect(normalizeFio('Николаев М.')).toMatchObject({ value: 'Николаев М.' });
+  });
+
+  // Регрессия: цепочка инициалов не распознавалась и приводилась как слово.
+  test('цепочка инициалов целиком в верхнем регистре', () => {
+    expect(normalizeFio('Степанова А.о.')).toMatchObject({ value: 'Степанова А.О.', changed: true });
+    expect(normalizeFio('Иванов а.б.')).toMatchObject({ value: 'Иванов А.Б.' });
+    expect(normalizeFio('СТЕПАНОВА А.О.')).toMatchObject({ value: 'Степанова А.О.' });
+    expect(normalizeFio('Алексеев И.А.')).toMatchObject({ changed: false });
   });
 });
 

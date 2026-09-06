@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'vitest';
+import { buildChangeSet } from '../../../src/domain/change-set.js';
+import { buildApplicationIndex } from '../../../src/domain/matching/index.js';
 import {
   buildCompanyIndex,
   companyNameKey,
@@ -165,4 +167,52 @@ test('сведение ё в ключе сравнения находит ком
   );
 
   expect(outcome.kind).toBe('matched');
+});
+
+
+describe('каноническое название из справочника', () => {
+  const references = { companies: index, applications: buildApplicationIndex([]) };
+
+  function nameAction(companyName: string) {
+    const changeSet = buildChangeSet(
+      [{ id: 'R1', values: { company_name: companyName } }],
+      references,
+    );
+    return changeSet.actions.find((action) => action.ruleCode === 'company_canonical_name');
+  }
+
+  test('латинское написание заменяется кириллическим из справочника', () => {
+    expect(nameAction('Romashka Integratsiya')?.after).toBe('Ромашка Интеграция');
+  });
+
+  test('город в конце названия убирается по алиасу справочника', () => {
+    expect(nameAction('Ромашка Интеграция Москва')?.after).toBe('Ромашка Интеграция');
+  });
+
+  test('ОПФ и регистр тоже приходят из справочника', () => {
+    expect(nameAction('ооо «ромашка интеграция»')?.after).toBe('Ромашка Интеграция');
+  });
+
+  test('совпадающее название предложения не даёт', () => {
+    expect(nameAction('Ромашка Интеграция')).toBeUndefined();
+  });
+
+  // Иначе пользователь увидел бы два конкурирующих предложения на одно поле.
+  test('каноническое название вытесняет обычную нормализацию того же поля', () => {
+    const changeSet = buildChangeSet(
+      [{ id: 'R1', values: { company_name: '  ооо  "Ромашка Интеграция"  ' } }],
+      references,
+    );
+    const onName = changeSet.actions.filter((action) => action.field === 'company_name');
+
+    expect(onName).toHaveLength(1);
+    expect(onName[0]?.ruleCode).toBe('company_canonical_name');
+  });
+
+  test('без справочника название чинится обычным правилом', () => {
+    const changeSet = buildChangeSet([{ id: 'R1', values: { company_name: '  ооо  "Прочее"  ' } }]);
+    const onName = changeSet.actions.filter((action) => action.field === 'company_name');
+
+    expect(onName[0]?.ruleCode).toBe('company_name');
+  });
 });

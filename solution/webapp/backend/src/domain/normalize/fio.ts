@@ -1,8 +1,11 @@
 import { EMPTY, issue, readRaw, type NormalizationIssue, type NormalizationResult } from './types.js';
 
+/** Цепочка инициалов: «А.», «А.О.», «а.о.» — в любом регистре. */
+const INITIALS = /^(?:\p{L}\.){1,3}$/u;
+
 function capitalize(part: string): string {
-  // «И.О.» и подобные инициалы остаются в верхнем регистре.
-  if (/^[А-ЯA-Z]\.$/u.test(part)) return part.toUpperCase();
+  // Инициалы целиком в верхнем регистре: «А.о.» → «А.О.».
+  if (INITIALS.test(part)) return part.toUpperCase();
   return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
 }
 

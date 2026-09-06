@@ -1,4 +1,5 @@
 import { EMPTY, issue, readRaw, type NormalizationIssue, type NormalizationResult } from './types.js';
+import { CITY_BY_COMPARABLE, cityComparable, LATIN_TO_CITY, titleCaseCity } from './cities.js';
 
 /**
  * Известные сокращения и латинские варианты из dev-выборки.
@@ -35,15 +36,32 @@ export function normalizeCity(raw: unknown): NormalizationResult {
   const alias = ALIASES.get(value.toLowerCase());
   if (alias !== undefined) value = alias;
 
-  // Название населённого пункта — отображаемое собственное имя. Меняем только
-  // первый буквенный символ и не применяем title case ко всей строке, чтобы не
-  // испортить корректный регистр в значениях вроде «Ростов-на-Дону».
-  value = value.replace(/^\p{L}/u, (first) => first.toLocaleUpperCase('ru-RU'));
+  const key = cityComparable(value);
+
+  // Латинское написание разворачивается в каноническое кириллическое:
+  // сравнение идёт с транслитерацией известных городов, а не наугад.
+  const fromLatin = LATIN_TO_CITY.get(key);
+  if (fromLatin !== undefined) value = fromLatin;
+  else {
+    // «ИЖЕВСК» и «ижевск» — тот же город, что «Ижевск»: берём каноническое
+    // написание из словаря, а незнакомое название просто приводим к виду
+    // «с заглавной», не выдумывая для него канон.
+    const known = CITY_BY_COMPARABLE.get(key);
+    value = known ?? titleCaseCity(value);
+  }
 
   const issues: NormalizationIssue[] = [];
-  if (/[A-Za-z]/.test(value)) {
+  // Опечатки («Челябинкс»), смешанный алфавит («Пеuмь»), сокращения («С-Пб») и
+  // обрезанные названия («Ростов-на-Д.») детерминированно не восстановить.
+  // Такое значение не выдумывается, а помечается для разбора человеком — при
+  // необходимости с помощью AI-панели, которая вызывается явным действием.
+  if (!CITY_BY_COMPARABLE.has(cityComparable(value))) {
     issues.push(
-      issue('info', 'LATIN_CITY', 'Название города латиницей: кириллический вариант неизвестен'),
+      issue(
+        'info',
+        'UNRECOGNIZED_CITY',
+        `Город «${value}» не найден в справочнике: возможна опечатка или сокращение`,
+      ),
     );
   }
 
