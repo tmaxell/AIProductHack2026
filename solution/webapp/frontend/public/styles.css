@@ -140,6 +140,9 @@ body {
   color: var(--text-muted);
   display: inline-flex; align-items: center; justify-content: center;
 }
+/* .tool-btn на <button> (в отличие от декоративных <span>) — реально кликабельная кнопка */
+button.tool-btn { background: none; border: none; font: inherit; cursor: pointer; }
+button.tool-btn:hover { background: var(--bg-hover); color: var(--text); }
 .tb-search {
   margin-left: auto; display: flex; align-items: center; gap: 6px;
   background: var(--bg-work); border: 1px solid var(--border);
@@ -307,6 +310,29 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 }
 .rule-row:last-child { border-bottom: none; }
 .rule-row .rr-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ---- настройки проверки: область запуска + список полей ---- */
+.settings-hint { color: var(--text-muted); font-size: 12px; margin-bottom: 8px; line-height: 1.5; }
+.settings-hint b { color: var(--text); }
+.settings-hint.warn { color: var(--red); background: var(--red-light); border-radius: var(--r-card); padding: 8px 10px; }
+.field-list {
+  border: 1px solid var(--border); border-radius: var(--r-card);
+  overflow: hidden; margin-bottom: 4px;
+}
+.field-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.field-row:last-child { border-bottom: none; }
+.field-row:hover { background: var(--bg-work); }
+
+.text-muted { color: var(--text-muted); }
+
+/* ---- итоговый отчёт запуска: вложенная таблица задач под строкой заявки ---- */
+table.launch-tasks { width: 100%; margin: 6px 0 10px; font-size: 12px; }
+table.launch-tasks th { position: static; height: 28px; background: var(--bg-work); }
+table.launch-tasks td { height: 30px; white-space: normal; max-width: none; }
 
 /* min-height резервирует место под secondary, чтобы primary не прыгал
    между состояниями виджета */

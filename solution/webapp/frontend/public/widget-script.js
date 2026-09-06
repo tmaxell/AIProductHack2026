@@ -1,266 +1,427 @@
 /* ============================================================
-   MOCK Widget Script — "Project Launch Copilot"
-   Имитация выполнения в MWS Tables (Script Widget).
-   Реализует Этап 2 (валидация и нормализация) + базу Matching.
+   widget-script.js — АДАПТЕР между реальным движком (engine.js,
+   портированным из solution/src/lib/ на ветке feature/add_mvp_solution)
+   и плоской строкой данных мок-таблицы (data.js), плюс реальными
+   справочниками companies.js/employees.js/templates.js.
+
+   Реальный движок работает с объектами по схеме {*_raw, normalized_*}.
+   Этот файл строит "теневые" объекты заявок из плоских полей строки,
+   прогоняет через engine.js и переводит результат обратно в контракт,
+   который уже понимает app.js: {issues, changes, hasError, ok}.
+
+   Пайплайн — ровно как в src/widget/main.js#run(): фаза за фазой по
+   ВСЕМУ набору строк, а не по одной строке изолированно:
+     1) normalize (Milestone 3)                — по каждой строке независимо
+     2) дедуп заявок (Milestone 5)              — по всему набору разом
+     3) сопоставление с Компаниями/Сотрудниками (Milestone 5) — по всему набору разом
+     4) классификация типа/приоритета (Milestone 6) — по всему набору разом
+     5) аномалии (Milestone 7)                  — по всему набору разом
    ============================================================ */
 
-// --- Логика валидации (та же, что будет в реальном Widget Script) ---
-
-function normalizeEmail(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).trim().toLowerCase();
-  v = v.replace(/^mailto:/i, '').replace(/\s+/g, '').replace(/;$/, '').trim();
-  const issues = [];
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) issues.push({ type: 'error', code: 'INVALID_EMAIL', msg: 'Некорректный email' });
-  const changed = String(raw).trim() !== v;
-  return { value: v, changed, issues };
-}
-
-function normalizePhone(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).replace(/[^\d]/g, '');
-  const issues = [];
-  if (v.length === 10) v = '7' + v;
-  if (v.length === 11 && v[0] === '8') v = '7' + v.slice(1);
-  if (/^\*+$/.test(String(raw).replace(/[^\d*]/g, '')) || (String(raw).includes('*'))) {
-    issues.push({ type: 'warn', code: 'MASKED_PHONE', msg: 'Номер маскирован (*)' });
-  }
-  if (v.length < 10 || v.length > 12) issues.push({ type: 'error', code: 'BAD_PHONE', msg: 'Некорректная длина телефона' });
-  if (v.length === 11) v = '+' + v;
-  const changed = String(raw).trim() !== v;
-  return { value: v, changed, issues };
-}
-
-function normalizeInn(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).toUpperCase().replace(/^ИНН\s*/i, '').replace(/\s+/g, '').replace(/\.0$/, '').trim();
-  const issues = [];
-  if (!/^\d{10}$|^\d{12}$/.test(v) && !/(\d{2})-(\d{2})/.test(v)) {
-    if (!/^\d+$/.test(v)) issues.push({ type: 'error', code: 'BAD_INN', msg: 'ИНН не число' });
-    else issues.push({ type: 'error', code: 'BAD_INN_LEN', msg: 'ИНН: ожидается 10 или 12 цифр' });
-  }
-  const changed = String(raw).trim() !== v;
-  return { value: v, changed, issues };
-}
-
-function normalizeCity(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).replace(/\s+/g, ' ').trim().replace(/^[Гг]\s*/, '');
-  const issues = [];
-  // Чиним известные/латинские варианты
-  const map = {
-    'Vladivostok': 'Владивосток', 'Krasnoyarsk': 'Красноярск', 'Nsk': 'Новосибирск',
-    'Екб': 'Екатеринбург', 'Нск': 'Новосибирск', 'Спб': 'Санкт-Петербург',
-    'Мск': 'Москва', 'Члб': 'Челябинск', 'Оренб': 'Оренбург', 'Томс': 'Томск'
+/** Единственная часть файла, НЕ портированная из mvp-ветки: реальный
+ * движок (Milestone 3) вообще не нормализует ИНН — anomalies.js
+ * только проверяет, что он не пустой (см. engine.js#RULES).
+ * Здесь — простая зачистка формата для UI (не решает, валиден ли ИНН). */
+function cleanupInnDisplay(raw) {
+  if (!raw) return { value: null, changed: false, confidence: null, reason: 'empty' };
+  const original = String(raw);
+  const value = original.toUpperCase().replace(/^ИНН\s*/i, '').replace(/\s+/g, '').replace(/\.0+$/, '').trim();
+  return {
+    value,
+    changed: value !== original,
+    confidence: null,
+    reason: 'очистка формата (не часть портированного движка — Milestone 3 не нормализует ИНН, только проверяет непустоту)',
   };
-  const normKey = Object.keys(map).find(k => v.toLowerCase() === k.toLowerCase());
-  if (normKey) { v = map[normKey]; }
-  if (/[A-Za-z]/.test(v)) issues.push({ type: 'info', code: 'LATIN_CITY', msg: 'Название города латиницей — будет кириллица' });
-  const changed = String(raw).trim() !== v;
-  return { value: v, changed, issues };
 }
 
-function normalizeFio(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  const parts = String(raw).replace(/\s+/g, ' ').trim().split(' ');
-  const issues = [];
-  if (parts.length < 2) issues.push({ type: 'warn', code: 'SHORT_FIO', msg: 'ФИО слишком короткое' });
-  const capitalized = parts.map(p => {
-    if (!p) return p;
-    // Фамилия И.О. формат
-    if (/^[А-ЯA-Z]\.$/.test(p)) return p.toUpperCase();
-    return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
-  }).join(' ');
-  const changed = String(raw).trim() !== capitalized;
-  return { value: capitalized, changed, issues };
+/** knownCities (см. engine.js#normalizeCity) — в реальном коде из справочника Компаний; здесь,
+ * за неимением справочника, собираются из уже "чистых" (кириллица, без цифр) значений company_city
+ * по всей текущей выборке. Абсолютно так же, как реальный алгоритм собирает их из companies datasheet.
+ * Если поле "company_city" отключено чекбоксом (см. app.js#toggleColumn) — справочник пуст: город
+ * во всём прогоне для движка как будто отсутствует, а не просто "не показан на экране". */
+function collectKnownCities(records, fieldsEnabled) {
+  if (fieldsEnabled && fieldsEnabled.company_city === false) return [];
+  const clean = records
+    .map((r) => (r.company_city || '').replace(/^\s*г[.\s]+/i, '').trim())
+    .filter((c) => c && /^[А-ЯЁа-яё\- ]+$/.test(c));
+  return [...new Set(clean)];
 }
 
-function normalizeBudget(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).trim();
-  const issues = [];
-  // Убираем пробелы/неразрывные пробелы и отделяем валюту (`RUB`, `RUR`, `₽`, `руб., рубли`)
-  let numMatch = v.replace(/[\s\u00A0]/g, '');
-  numMatch = numMatch.replace(/^(RUB|RUR|₽|руб|рубли|РУБ|РУБЛИ|₽)/i, '')
-                     .replace(/(RUB|RUR|₽|руб|рубли|РУБ|РУБЛИ|₽)$/i, '')
-                     .replace(/[₽]/g, '')
-                     .trim();
-  let cleaned = numMatch;
-  // "2,08 млн" / "4081 тыс." / "1 967 000" / "4 603 000 ₽"
-  let num = null;
-  const million = numMatch.match(/^([\d.,]+)\s*млн/i);
-  const thousand = numMatch.match(/^([\d.,]+)\s*тыс/i);
-  const plain = numMatch.match(/^[\d.,]+$/);
-  if (million) {
-    num = parseFloat(million[1].replace(',', '.')) * 1e6;
-    cleaned = String(Math.round(num));
-  } else if (thousand) {
-    num = parseFloat(thousand[1].replace(',', '.')) * 1e3;
-    cleaned = String(Math.round(num));
-  } else if (plain) {
-    num = parseFloat(plain[0].replace(',', '.'));
-    cleaned = String(Math.round(num));
-  } else {
-    issues.push({ type: 'error', code: 'BAD_BUDGET', msg: 'Формат бюджета не распознан' });
+// ------------------------------------------------------------
+// Справочники (companies.js/employees.js/templates.js) — реальные записи из
+// data/raw/dev-sample.csv, той же выборки, откуда взяты 30 заявок в data.js.
+// match.js/классификатору нужно поле `.id` на каждой сущности (в реальном MWS
+// его подставляет recordToRoleObject; здесь у справочников только
+// company_ref_id/employee_id — добавляем алиас `id` один раз, лениво).
+// ------------------------------------------------------------
+let _companiesWithId = null;
+let _employeesWithId = null;
+let _canonicalTypeIndex = null;
+
+function getCompanies() {
+  if (!_companiesWithId) {
+    _companiesWithId = (window.MVP_COMPANIES || []).map((c) => ({ ...c, id: c.company_ref_id }));
   }
-  let anomaly = null;
-  if (num !== null) {
-    if (num <= 0) issues.push({ type: 'error', code: 'ZERO_BUDGET', msg: 'Бюджет ≤ 0' });
-    if (num > 1e8) { issues.push({ type: 'warn', code: 'HUGE_BUDGET', msg: 'Бюджет аномально велик (>100 млн)' }); anomaly = true; }
-    if (num < 10000) issues.push({ type: 'warn', code: 'TINY_BUDGET', msg: 'Бюджет подозрительно мал (<10 тыс)' }); 
+  return _companiesWithId;
+}
+
+function getEmployees() {
+  if (!_employeesWithId) {
+    _employeesWithId = (window.MVP_EMPLOYEES || [])
+      .filter((e) => e.employee_active !== '0') // '0'/'1' в этих CSV-полях, не true/false
+      .map((e) => ({ ...e, id: e.employee_id }));
   }
-  const changed = String(raw).trim() !== cleaned;
-  return { value: cleaned, changed, issues, anomaly };
+  return _employeesWithId;
 }
 
-function normalizeDate(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).trim();
-  const issues = [];
-  let d = null;
-  // ISO
-  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  // DD.MM.YYYY or DD/MM/YYYY
-  const ru = v.match(/^(\d{2})[./](\d{2})[./](\d{4})/);
-  // DD Month YYYY (Russian)
-  const months = { 'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6, 'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12 };
-  const ruLong = v.match(/^(\d{1,2})\s+([а-яё]+)\s+(\d{4})/i);
-  const slashDDMMYY = v.match(/^(\d{2})[./](\d{2})[./](\d{2})(\d{2})$/);
-  const ddmmYY = v.match(/^(\d{2})[./](\d{2})[./](\d{2})$/); // 06.02.27
-  if (iso) d = new Date(iso[1], iso[2]-1, iso[3]);
-  else if (ru) d = new Date(ru[3], ru[2]-1, ru[1]);
-  else if (slashDDMMYY) d = new Date(slashDDMMYY[3], slashDDMMYY[2]-1, slashDDMMYY[1]);
-  else if (ddmmYY) d = new Date(Number('20' + ddmmYY[3]), ddmmYY[2]-1, ddmmYY[1]);
-  else if (ruLong) { const m = months[ruLong[2].toLowerCase()]; if (m) d = new Date(ruLong[3], m-1, ruLong[1]); }
-  if (!d || isNaN(d)) { issues.push({ type: 'error', code: 'BAD_DATE', msg: 'Дата не распознана' }); return { value: v, changed: false, issues }; }
-  if (d.getFullYear() < 2020 || d.getFullYear() > 2035) issues.push({ type: 'warn', code: 'ODD_DATE', msg: 'Дата вне разумного диапазона' });
-  const out = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-  const changed = out !== String(raw).trim().slice(0,10);
-  return { value: out, changed, issues };
+function getCanonicalTypeIndex() {
+  if (!_canonicalTypeIndex) {
+    _canonicalTypeIndex = window.CopilotEngine.classify.buildCanonicalTypeIndex(window.MVP_TEMPLATES || []);
+  }
+  return _canonicalTypeIndex;
 }
 
-function normalizeCompany(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).replace(/\s+/g, ' ').trim();
-  const issues = [];
-  // Убрать ОПФ
-  v = v.replace(/^(ООО|ОАО|ЗАО|АО|ИП|ПАО)\s*[«"]?\s*/i, '').replace(/[»"]\s*$/g, '').replace(/\s*[«"]/g, '');
-  // Generic name (после "/")
-  v = v.replace(/^.*\/\s*/, '');
-  v = v.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-  if (/[A-Za-z]/.test(String(raw))) issues.push({ type: 'info', code: 'LATIN_COMPANY', msg: 'Название латиницей' });
-  const changed = true;
-  return { value: v, changed, issues };
+/**
+ * Строит "теневую" заявку по схеме реального движка ({id, *_raw, normalized_*}) из строки мок-таблицы.
+ *
+ * fieldsEnabled — какие поля сейчас реально участвуют в прогоне (см. app.js#visibleColumns,
+ * чекбоксы в меню 👁 "Скрытые поля"). Отключённое поле НЕ просто прячется в интерфейсе — оно здесь
+ * подменяется на `null`, ДО того как дойдёт до normalize/match/classify/anomalies. Значит для
+ * отключённого поля вся цепочка ниже увидит "пусто" и обработает его как честно отсутствующее
+ * значение — не отдельная разводка на каждую фазу.
+ */
+function buildShadowApplication(row, fieldsEnabled) {
+  const en = (key) => !fieldsEnabled || fieldsEnabled[key] !== false;
+  const v = (key, value) => (en(key) ? value : null);
+  return {
+    id: row.row_id,
+    application_id_raw: v('application_id', row.application_id),
+    project_name_raw: v('project_name', row.project_name),
+    project_type_raw: v('project_type', row.project_type),
+    company_name_raw: v('company_name', row.company_name),
+    company_inn_raw: v('company_inn', row.company_inn),
+    company_email_raw: v('company_email', row.company_email),
+    company_phone_raw: v('company_phone', row.company_phone),
+    company_city_raw: v('company_city', row.company_city),
+    requester_fio_raw: v('requester_fio', row.requester_fio),
+    requester_email_raw: v('requester_email', row.requester_email),
+    requester_phone_raw: v('requester_phone', row.requester_phone),
+    priority_raw: v('priority', row.priority),
+    budget_raw: v('budget', row.budget),
+    currency_raw: v('currency', row.currency),
+    planned_start_raw: v('planned_start', row.planned_start),
+    planned_end_raw: v('planned_end', row.planned_end),
+    project_status_raw: v('status', row.status),
+    // Идемпотентность (см. match.js#findApplicationDuplicates/findCompanyMatches/findEmployeeMatches):
+    // заявки, уже связанные с прошлого прогона, повторно не сканируются.
+    duplicate_link: row.duplicate_link || null,
+    duplicate_group_id: row.duplicate_group_id || null,
+    company_link: row.company_link || null,
+    employee_link: row.employee_link || null,
+  };
 }
 
-function normalizeProjectName(raw) {
-  if (!raw) return { value: null, changed: false, issues: [] };
-  let v = String(raw).replace(/\s+/g, ' ').trim();
-  v = v.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
-  return { value: v, changed: true, issues: [] };
-}
-
-// --- Валидация строки целиком ---
-function validateRow(row) {
-  const issues = [];
+/**
+ * Нормализация ОДНОЙ строки (Milestone 3) через реальный движок. Заполняет normalized_* поля
+ * на shadow (нужны следующим фазам) и возвращает список предложенных изменений в формате отчёта
+ * app.js ({field, from, to, reason, confidence}) — field совпадает с именем поля САМОЙ строки
+ * (не normalized_*), т.к. в этом мок-фронте, в отличие от реального MWS, нет отдельной колонки
+ * "исходное/нормализованное" — правка применяется поверх той же ячейки, что и в исходном мок-UI.
+ */
+function normalizeRow(row, shadow, knownCities, fieldsEnabled) {
+  const E = window.CopilotEngine.normalize;
+  const en = (key) => !fieldsEnabled || fieldsEnabled[key] !== false;
   const changes = [];
 
-  // Email компании
-  const em = normalizeEmail(row.company_email);
-  if (em.value !== null) {
-    row._companyEmailOk = !em.issues.some(i => i.type === 'error');
-    if (em.changed) changes.push({ field: 'company_email', from: row.company_email, to: em.value, reason: 'Нормализация email' });
-    if (em.issues.length) row._issuesEmail = em.issues;
+  function add(field, r, toOverride) {
+    const to = toOverride !== undefined ? toOverride : r.value;
+    if (!r.changed) return;
+    if (to === row[field]) return; // уже применено на прошлом прогоне — идемпотентность
+    changes.push({
+      field, from: row[field], to, reason: r.reason, confidence: r.confidence,
+    });
   }
 
-  // Телефон компании
-  const ph = normalizePhone(row.company_phone);
-  if (ph.value !== null) {
-    row._companyPhoneOk = !ph.issues.some(i => i.type === 'error');
-    if (ph.changed) changes.push({ field: 'company_phone', from: row.company_phone, to: ph.value, reason: 'Нормализация телефона' });
-    if (ph.issues.length) row._issuesPhone = ph.issues;
+  // Отключённое поле (см. buildShadowApplication) не обрабатывается вообще: ни изменения для
+  // отчёта, ни normalized_*-значения для следующих фаз — как будто поля не существует.
+  if (en('company_email')) {
+    const companyEmail = E.normalizeEmail(row.company_email);
+    add('company_email', companyEmail);
+    shadow.normalized_company_email = companyEmail.value;
   }
 
-  // ИНН
-  const inn = normalizeInn(row.company_inn);
-  if (inn.value !== null) {
-    row._innOk = !inn.issues.some(i => i.type === 'error');
-    if (inn.changed) changes.push({ field: 'company_inn', from: row.company_inn, to: inn.value, reason: 'Нормализация ИНН' });
-    if (inn.issues.length) row._issuesInn = inn.issues;
+  if (en('requester_email')) {
+    const requesterEmail = E.normalizeEmail(row.requester_email);
+    add('requester_email', requesterEmail);
   }
 
-  // Город
-  const city = normalizeCity(row.company_city);
-  if (city.value !== null) {
-    row._cityOk = !city.issues.some(i => i.type === 'error');
-    if (city.changed) changes.push({ field: 'company_city', from: row.company_city, to: city.value, reason: 'Нормализация города' });
-    if (city.issues.length) row._issuesCity = city.issues;
+  if (en('company_phone')) {
+    const companyPhone = E.normalizePhone(row.company_phone);
+    add('company_phone', companyPhone);
+    shadow.normalized_company_phone = companyPhone.value;
   }
 
-  // ФИО
-  const fio = normalizeFio(row.requester_fio);
-  if (fio.value !== null) {
-    row._fioOk = !fio.issues.some(i => i.type === 'error');
-    if (fio.changed) changes.push({ field: 'requester_fio', from: row.requester_fio, to: fio.value, reason: 'Нормализация ФИО' });
-    if (fio.issues.length) row._issuesFio = fio.issues;
+  if (en('requester_phone')) {
+    const requesterPhone = E.normalizePhone(row.requester_phone);
+    add('requester_phone', requesterPhone);
   }
 
-  // Бюджет
-  const bud = normalizeBudget(row.budget);
-  if (bud.value !== null) {
-    row._budgetOk = !bud.issues.some(i => i.type === 'error');
-    row._budgetAnomaly = bud.anomaly || false;
-    if (bud.changed) changes.push({ field: 'budget', from: row.budget, to: bud.value, reason: 'Нормализация бюджета' });
-    if (bud.issues.length) row._issuesBudget = bud.issues;
+  if (en('company_inn')) {
+    const inn = cleanupInnDisplay(row.company_inn);
+    add('company_inn', inn);
   }
 
-  // Даты
-  const ds = normalizeDate(row.planned_start);
-  const de = normalizeDate(row.planned_end);
-  if (ds.value !== null) {
-    row._startOk = !ds.issues.some(i => i.type === 'error');
-    if (ds.changed) changes.push({ field: 'planned_start', from: row.planned_start, to: ds.value, reason: 'Нормализация даты начала' });
-    if (ds.issues.length) row._issuesStart = ds.issues;
+  if (en('company_city')) {
+    const city = E.normalizeCity(row.company_city, knownCities);
+    add('company_city', city);
+    shadow.normalized_city = city.value;
   }
-  if (de.value !== null) {
-    row._endOk = !de.issues.some(i => i.type === 'error');
-    if (de.changed) changes.push({ field: 'planned_end', from: row.planned_end, to: de.value, reason: 'Нормализация даты окончания' });
-    if (de.issues.length) row._issuesEnd = de.issues;
+
+  if (en('company_name')) {
+    const companyName = E.normalizeCompanyName(row.company_name);
+    add('company_name', companyName);
+    shadow.normalized_company_name = companyName.value;
   }
-  // Проверка start <= end
-  if (ds.value && de.value && /^\d{4}-\d{2}-\d{2}/.test(ds.value) && /^\d{4}-\d{2}-\d{2}/.test(de.value)) {
-    if (ds.value > de.value) {
-      issues.push({ type: 'error', code: 'REVERSED_DATES', msg: 'Дата окончания раньше даты начала' });
-      row._issuesDates = [{ type: 'error', code: 'REVERSED_DATES', msg: 'Дата окончания раньше даты начала' }];
+
+  if (en('requester_fio')) {
+    const fio = E.normalizeFio(row.requester_fio);
+    const fioValue = [fio.lastName, fio.firstName, fio.middleName].filter(Boolean).join(' ') || null;
+    add('requester_fio', { value: fioValue, changed: fio.changed, confidence: fio.confidence, reason: fio.reason });
+  }
+
+  if (en('budget')) {
+    // normalizeBudget читает и валюту (row.currency) для распознавания инлайн-валюты — но если
+    // именно поле "currency" отключено, а "budget" нет, парсинг суммы всё равно должен работать
+    // (сумма — самостоятельное поле), поэтому здесь используем row.currency напрямую, а не en('currency').
+    const budget = E.normalizeBudget(row.budget, row.currency);
+    add('budget', budget, budget.value === null ? null : String(budget.value));
+    shadow.normalized_budget_amount = budget.value;
+
+    if (en('currency')) {
+      const currencyChanged = budget.currencyCode !== row.currency;
+      const currencyReason = budget.currencyCode
+        ? (currencyChanged ? 'нормализована валюта' : `валюта распознана как ${budget.currencyCode}`)
+        : 'валюта не распознана';
+      add('currency', {
+        value: budget.currencyCode, changed: Boolean(budget.currencyCode) && currencyChanged, confidence: budget.currencyCode ? 0.8 : 0, reason: currencyReason,
+      });
+      shadow.normalized_currency_code = budget.currencyCode;
     }
   }
 
-  // Агрегация общих issues
-  const allIssueGroups = [row._issuesEmail, row._issuesPhone, row._issuesInn, row._issuesCity, row._issuesFio, row._issuesBudget, row._issuesStart, row._issuesEnd, row._issuesDates];
-  const aggregated = [];
-  allIssueGroups.forEach(g => { if (g) g.forEach(i => aggregated.push(i)); });
+  if (en('planned_start')) {
+    const start = E.normalizeDate(row.planned_start);
+    add('planned_start', start);
+    shadow.normalized_planned_start = start.value;
+  }
+
+  if (en('planned_end')) {
+    const end = E.normalizeDate(row.planned_end);
+    add('planned_end', end);
+    shadow.normalized_planned_end = end.value;
+  }
+
+  // Приоритет НЕ нормализуется здесь напрямую — он приходит из classify.js#classifyApplications
+  // (Milestone 6, фаза классификации), как в реальном пайплайне. См. mergeClassifyActions ниже.
+
+  return changes;
+}
+
+/** Фаза 3 (Milestone 5, продолжение): сопоставление со справочниками Компаний/Сотрудников.
+ * Возвращает только AUTO-бакет как готовые "changes" (безопасно для массового применения);
+ * MANUAL-бакет (неуверенные кандидаты) не применяется автоматически — только считается отдельно,
+ * как "требует ручного выбора", ровно как в реальном preview-движке (Milestone 4, US11). */
+function mergeMatchActions(row, shadow, companyActionsByRecord, employeeActionsByRecord, stats) {
+  const companiesById = new Map(getCompanies().map((c) => [c.id, c]));
+  const employeesById = new Map(getEmployees().map((e) => [e.id, e]));
+
+  const companyActions = companyActionsByRecord.get(row.row_id) || [];
+  const autoCompany = companyActions.find((a) => a.bucket === 'auto');
+  // _matchedCompanyId — уже подтверждённая (auto) ИЛИ ранее применённая связь; читает launch.js
+  // (Milestone 8-10) для итогового отчёта запуска — там нужен id компании, а не только текст.
+  row._matchedCompanyId = autoCompany ? autoCompany.to : (row.company_link || null);
+  if (autoCompany) {
+    const company = companiesById.get(autoCompany.to);
+    row._validationChanges.push({
+      field: 'company_link',
+      from: row.company_link ? (companiesById.get(row.company_link) || {}).company_legal_name : null,
+      to: autoCompany.to,
+      toDisplay: company ? company.company_legal_name : autoCompany.to,
+      reason: autoCompany.reason,
+      confidence: autoCompany.confidence,
+    });
+    stats.companiesAutoMatched += 1;
+  } else if (companyActions.some((a) => a.bucket === 'manual')) {
+    stats.companiesManualReview += 1;
+  }
+
+  const employeeActions = employeeActionsByRecord.get(row.row_id) || [];
+  const autoEmployee = employeeActions.find((a) => a.bucket === 'auto');
+  if (autoEmployee) {
+    const employee = employeesById.get(autoEmployee.to);
+    row._validationChanges.push({
+      field: 'employee_link',
+      from: row.employee_link ? (employeesById.get(row.employee_link) || {}).employee_fio : null,
+      to: autoEmployee.to,
+      toDisplay: employee ? employee.employee_fio : autoEmployee.to,
+      reason: autoEmployee.reason,
+      confidence: autoEmployee.confidence,
+    });
+    stats.employeesAutoMatched += 1;
+  } else if (employeeActions.some((a) => a.bucket === 'manual')) {
+    stats.employeesManualReview += 1;
+  }
+}
+
+/** Фаза 4 (Milestone 6): классификация типа проекта + приоритет. Идемпотентность здесь считаем
+ * вручную (сравнение с ТЕКУЩИМ значением поля строки), т.к. classifyApplications сравнивает
+ * с полем suggested_* на shadow, которое в этом мок-фронте не хранится отдельно от самого поля. */
+function mergeClassifyActions(row, classifyActionsByRecord, classifyResultByRecord, stats) {
+  const actions = classifyActionsByRecord.get(row.row_id) || [];
+  const result = classifyResultByRecord.get(row.row_id);
+  row._classifyResult = result || null; // читает launch.js (Milestone 8-10) для превью плана задач
+
+  const typeAction = actions.find((a) => a.field === 'suggested_project_type' && a.bucket === 'auto');
+  if (typeAction && typeAction.to !== row.project_type) {
+    row._validationChanges.push({
+      field: 'project_type', from: row.project_type, to: typeAction.to, reason: typeAction.reason, confidence: typeAction.confidence,
+    });
+    stats.typesAutoClassified += 1;
+  } else if (result && result.suggestedType === null && result.typeConfidence >= 0.3) {
+    stats.typesManualReview += 1;
+  }
+
+  const priorityAction = actions.find((a) => a.field === 'suggested_priority');
+  if (priorityAction && priorityAction.to !== row.priority) {
+    row._validationChanges.push({
+      field: 'priority', from: row.priority, to: priorityAction.to, reason: priorityAction.reason, confidence: priorityAction.confidence,
+    });
+  }
+}
+
+/**
+ * Полный прогон (Milestones 3 + 5 + 6 + 7) по ВСЕМУ набору строк — мутирует каждую строку теми же
+ * полями, что раньше заполнял mock (_validationOk/_validationError/_validationIssues/_validationChanges),
+ * так что app.js не нужно менять контракт рендера, только источник данных.
+ *
+ * @param {object} [fieldsEnabled] - {fieldKey: false} для полей, отключённых чекбоксом в меню
+ *   👁 "Скрытые поля" (app.js#visibleColumns) — отсутствующий ключ или true = поле участвует.
+ *   Отключение реально убирает поле из ВСЕХ фаз (не только из отчёта) — см. buildShadowApplication.
+ */
+function validateAll(records, fieldsEnabled) {
+  const knownCities = collectKnownCities(records, fieldsEnabled);
+  const shadows = [];
+
+  // --- Фаза 1: нормализация, построчно (Milestone 3) ---
+  records.forEach((row) => {
+    const shadow = buildShadowApplication(row, fieldsEnabled);
+    const changes = normalizeRow(row, shadow, knownCities, fieldsEnabled);
+    row._validationChanges = changes;
+    shadows.push(shadow);
+  });
+
+  const thresholds = window.CopilotEngine.match.DEFAULT_THRESHOLDS;
+
+  // --- Фаза 2: дедуп заявок, батчем по всей выборке (Milestone 5) ---
+  const dedup = window.CopilotEngine.match.findApplicationDuplicates(shadows, { thresholds });
+  const dedupByRecord = new Map();
+  dedup.candidates
+    .filter((c) => c.changed && c.bucket === 'auto' && c.field === 'duplicate_link')
+    .forEach((c) => {
+      if (!dedupByRecord.has(c.recordId)) dedupByRecord.set(c.recordId, []);
+      dedupByRecord.get(c.recordId).push(c);
+    });
+  const groupIdActions = new Map(dedup.candidates.filter((c) => c.changed && c.bucket === 'auto' && c.field === 'duplicate_group_id').map((c) => [c.recordId, c]));
+
+  // --- Фаза 3: сопоставление со справочниками Компаний/Сотрудников (Milestone 5) ---
+  const companyActions = window.CopilotEngine.match.findCompanyMatches(shadows, getCompanies(), { thresholds });
+  const employeeActions = window.CopilotEngine.match.findEmployeeMatches(shadows, getEmployees(), { thresholds });
+  const companyActionsByRecord = new Map();
+  companyActions.forEach((a) => {
+    if (!companyActionsByRecord.has(a.recordId)) companyActionsByRecord.set(a.recordId, []);
+    companyActionsByRecord.get(a.recordId).push(a);
+  });
+  const employeeActionsByRecord = new Map();
+  employeeActions.forEach((a) => {
+    if (!employeeActionsByRecord.has(a.recordId)) employeeActionsByRecord.set(a.recordId, []);
+    employeeActionsByRecord.get(a.recordId).push(a);
+  });
+
+  // Прежде чем считать аномалии — обновляем shadow.company_link авто-совпадениями этого прогона
+  // (не только тем, что уже было применено раньше), иначе NO_COMPANY_MATCH не увидит их вовремя.
+  const shadowsById = new Map(shadows.map((s) => [s.id, s]));
+  companyActionsByRecord.forEach((actions, recordId) => {
+    const auto = actions.find((a) => a.bucket === 'auto');
+    if (auto) shadowsById.get(recordId).company_link = auto.to;
+  });
+
+  // --- Фаза 4: классификация типа проекта + приоритет (Milestone 6) ---
+  const typeIndex = getCanonicalTypeIndex();
+  const { actions: classifyActionsRaw, results: classifyResults } = window.CopilotEngine.classify.classifyApplications(shadows, typeIndex, { thresholds });
+  const classifyActionsByRecord = new Map();
+  classifyActionsRaw.forEach((a) => {
+    if (!classifyActionsByRecord.has(a.recordId)) classifyActionsByRecord.set(a.recordId, []);
+    classifyActionsByRecord.get(a.recordId).push(a);
+  });
+  const classifyResultByRecord = new Map(classifyResults.map((r) => [r.recordId, r]));
+
+  // --- Фаза 5: аномалии, батчем по всей выборке (Milestone 7) ---
+  const anomaliesByRecord = window.CopilotEngine.anomalies.detectAnomaliesForBatch(shadows);
+
+  const stats = {
+    companiesAutoMatched: 0, companiesManualReview: 0, employeesAutoMatched: 0, employeesManualReview: 0, typesAutoClassified: 0, typesManualReview: 0,
+  };
+
+  records.forEach((row) => {
+    const linkActions = dedupByRecord.get(row.row_id) || [];
+    linkActions.forEach((c) => {
+      row._validationChanges.push({
+        field: 'duplicate_link', from: null, to: c.to, reason: c.reason, confidence: c.confidence, bucket: c.bucket,
+      });
+    });
+    const groupAction = groupIdActions.get(row.row_id);
+    if (groupAction) {
+      // Применяется вместе с остальными правками (см. app.js#applyNormalizations), но не показывается
+      // отдельной страницей отчёта — это служебное поле для идемпотентности, не для "было -> стало".
+      row._validationChanges.push({
+        field: 'duplicate_group_id', from: null, to: groupAction.to, reason: groupAction.reason, confidence: groupAction.confidence, hidden: true,
+      });
+    }
+
+    mergeMatchActions(row, shadowsById.get(row.row_id), companyActionsByRecord, employeeActionsByRecord, stats);
+    mergeClassifyActions(row, classifyActionsByRecord, classifyResultByRecord, stats);
+
+    const flags = anomaliesByRecord.get(row.row_id) || [];
+    row._validationIssues = flags.map((f) => ({ type: f.severity === 'blocking' ? 'error' : 'info', code: f.code, msg: f.message }));
+    row._validationError = window.CopilotEngine.anomalies.isBlocking(flags);
+    row._validationOk = !row._validationError;
+  });
 
   return {
-    issues: aggregated,
-    changes,
-    hasError: aggregated.some(i => i.type === 'error'),
-    hasWarn: aggregated.some(i => i.type === 'warn'),
-    ok: !aggregated.some(i => i.type === 'error')
+    ok: records.filter((r) => r._validationOk).length,
+    total: records.length,
+    duplicateClusters: dedup.clusters.length,
+    duplicateMembers: dedup.clusters.reduce((a, g) => a + g.length, 0),
+    ...stats,
   };
 }
 
-// --- Консольный лог виджета (имитация) ---
 function widgetConsoleLog(lines) {
   const buf = [];
-  buf.push('/* Project Launch Copilot — Widget Script */');
+  buf.push('/* Project Launch Copilot — Widget Script (реальный движок, engine.js) */');
   buf.push('Запуск: ' + new Date().toLocaleString('ru-RU'));
   buf.push('---');
-  lines.forEach(l => buf.push(l));
+  lines.forEach((l) => buf.push(l));
   return buf.join('\n');
 }
 
-// Экспорт для использования из HTML
+// Экспорт для использования из app.js — тот же неймспейс, что был у мока, чтобы не переписывать
+// все вызовы: window.LPC.
 window.LPC = {
-  normalizeEmail, normalizePhone, normalizeInn, normalizeCity, normalizeFio, normalizeBudget, normalizeDate, normalizeCompany, normalizeProjectName,
-  validateRow, widgetConsoleLog
+  validateAll,
+  widgetConsoleLog,
+  // Переиспользуются launch.js (Milestone 8-10) — те же справочники с тем же id-алиасом,
+  // без повторной загрузки/сопоставления.
+  getCompanies,
+  getEmployees,
 };
