@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 COMPOSE_PROD := docker compose -f docker-compose.yml
 
-.PHONY: help up down logs ps build prod install dev test lint typecheck check clean
+.PHONY: help up down logs ps build prod install dev test lint typecheck security-check check clean
 
 help: ## Показать список команд
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -41,7 +41,14 @@ lint: ## Линт бекенда
 typecheck: ## Проверка типов бекенда
 	cd backend && npm run typecheck
 
-check: lint typecheck test ## Все проверки подряд
+security-check: ## Проверить ignore секретов и tracked-файлы
+	@git check-ignore -q .env
+	@git check-ignore -q backend/.env
+	@if git grep -Il -E 'gsk_[A-Za-z0-9_-]{16,}' -- . ':!*.example' | grep -q .; then \
+		echo "Найден похожий на Groq-токен tracked-файл"; exit 1; \
+	else echo "Секреты Groq в tracked-файлах не найдены"; fi
+
+check: security-check lint typecheck test ## Все проверки подряд
 
 clean: ## Убрать контейнеры, тома и собранные артефакты
 	$(COMPOSE) down --remove-orphans --volumes

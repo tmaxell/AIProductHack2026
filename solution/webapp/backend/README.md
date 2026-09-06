@@ -83,6 +83,10 @@ rollback. Ответ валидируется по закрытой JSON Schema 
 Endpoint, модель, structured-output mode, timeout, retry и лимит ответа задаются
 переменными `GROQ_*`, перечисленными в `.env.example`.
 
+`GROQ_API_KEY` читается только из окружения backend. Он не входит в DTO,
+structured logs или SQLite и не копируется в Docker image: `.env*` исключены
+как общим `.gitignore`, так и `.dockerignore` backend build context.
+
 ## Справочник компаний
 
 Источник — демонстрационный набор `data/raw/dev-sample.csv`, путь задаётся

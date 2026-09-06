@@ -40,6 +40,10 @@ cp .env.example .env      # необязательно: у всех значен
 make up                   # режим разработки: hot reload бекенда и статики
 ```
 
+Без `GROQ_API_KEY` доступен весь детерминированный сценарий, а кнопка внешней
+отправки отключена. Чтобы включить AI-объяснение, ключ добавляют только в
+локальный `solution/webapp/.env`; файл исключён из Git и Docker build context.
+
 - приложение — <http://127.0.0.1:8080>
 - API — <http://127.0.0.1:8080/api/v1/health>
 - документация API (Swagger UI) — <http://127.0.0.1:8080/api/v1/docs>
@@ -58,6 +62,7 @@ make prod
 make install    # npm ci в backend/
 make dev        # tsx watch на http://127.0.0.1:8000
 make check      # lint + typecheck + тесты
+make security-check # ignore-правила и отсутствие Groq-токена в tracked-файлах
 ```
 
 ## Что уже есть и чего ещё нет
@@ -129,4 +134,4 @@ Frontend-демонстрация:
 [`docs/adr/0002-groq-change-set-explanations.md`](docs/adr/0002-groq-change-set-explanations.md).
 
 Секреты в репозиторий не коммитятся: `.env` в `.gitignore`, в примере значений
-секретов нет.
+секретов нет. `make security-check` проверяет это перед публикацией ветки.
