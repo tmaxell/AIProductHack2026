@@ -808,7 +808,10 @@ const VERSION_STATUS = {
 };
 
 function versionTitle(version) {
-  return (version.rollbackOfId ? 'Rollback Draft #' : 'Draft #') + version.sequence;
+  if (version.rollbackOfId) {
+    return (version.status === 'draft' ? 'Rollback Draft #' : 'Rollback #') + version.sequence;
+  }
+  return (version.status === 'draft' ? 'Draft #' : 'Версия #') + version.sequence;
 }
 
 async function openVersions() {
