@@ -60,9 +60,31 @@ window.API = {
   createChangeSet: (records, parentId) =>
     post('/change-sets', { records, ...(parentId ? { parentId } : {}) }),
 
+  getDatasetSnapshot: () => request('/dataset-snapshots/current'),
+
+  getDatasetRecords: (cursor, limit = 50, q = '') => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    if (q) params.set('q', q);
+    return request('/dataset-snapshots/current/records?' + params.toString());
+  },
+
+  createDatasetChangeSet: (parentId, limit) =>
+    post('/dataset-snapshots/current/change-sets', {
+      ...(parentId ? { parentId } : {}), ...(limit ? { limit } : {})
+    }),
+
   listChangeSets: (status) => request('/change-sets' + (status ? '?status=' + encodeURIComponent(status) : '')),
 
   getChangeSet: (id) => request('/change-sets/' + encodeURIComponent(id)),
+
+  getChangeSetActions: (id, options = {}) => {
+    const params = new URLSearchParams({ limit: String(options.limit || 50) });
+    ['cursor', 'ruleCode', 'decision', 'result', 'recordQuery'].forEach(key => {
+      if (options[key]) params.set(key, options[key]);
+    });
+    return request('/change-sets/' + encodeURIComponent(id) + '/actions?' + params.toString());
+  },
 
   saveDecisions: (id, actions) =>
     patch('/change-sets/' + encodeURIComponent(id) + '/decisions', { actions }),
@@ -73,12 +95,15 @@ window.API = {
   getChangeSetHistory: (id) =>
     request('/change-sets/' + encodeURIComponent(id) + '/history'),
 
-  previewExplanation: (id, actionIds) =>
-    post('/change-sets/' + encodeURIComponent(id) + '/explanation-preview', { actionIds }),
+  /** selection — либо {scope}, либо {actionIds} для точечной выборки. */
+  previewExplanation: (id, selection) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/explanation-preview', selection),
 
-  createExplanation: (id, actionIds) =>
+  createExplanation: (id, selection, instruction) =>
     request('/change-sets/' + encodeURIComponent(id) + '/explanations', {
-      method: 'POST', body: { actionIds }, timeoutMs: 60000
+      method: 'POST',
+      body: { ...selection, ...(instruction ? { instruction } : {}) },
+      timeoutMs: 60000
     }),
 
   listExplanations: (id) =>
@@ -87,8 +112,14 @@ window.API = {
   publishChangeSet: (id, records) =>
     post('/change-sets/' + encodeURIComponent(id) + '/publish', { records }),
 
+  publishDatasetChangeSet: (id) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/publish-current'),
+
   createRollback: (id, records) =>
     post('/change-sets/' + encodeURIComponent(id) + '/rollback', { records }),
+
+  createDatasetRollback: (id) =>
+    post('/change-sets/' + encodeURIComponent(id) + '/rollback-current'),
 
   discardChangeSet: (id) => post('/change-sets/' + encodeURIComponent(id) + '/discard'),
 

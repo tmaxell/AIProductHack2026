@@ -194,6 +194,77 @@ export const ChangeSetListQuery = Type.Object(
   { $id: 'ChangeSetListQuery' },
 );
 
+export const ActionPageQuery = Type.Object(
+  {
+    cursor: Type.Optional(Type.String()),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 50 })),
+    ruleCode: Type.Optional(Type.String()),
+    decision: Type.Optional(Type.Ref(ActionDecision)),
+    result: Type.Optional(Type.Ref(ActionResult)),
+    recordQuery: Type.Optional(Type.String()),
+  },
+  { $id: 'ActionPageQuery' },
+);
+
+export const ActionPage = Type.Object(
+  {
+    items: Type.Array(VersionedChangeAction),
+    nextCursor: Type.Optional(Type.String()),
+    total: Type.Integer(),
+    aggregates: Type.Object({
+      byRule: Type.Record(Type.String(), Type.Integer()),
+      byDecision: Type.Record(Type.String(), Type.Integer()),
+      byResult: Type.Record(Type.String(), Type.Integer()),
+    }),
+  },
+  { $id: 'ActionPage' },
+);
+
+export const DatasetRecordPageQuery = Type.Object(
+  {
+    cursor: Type.Optional(Type.String()),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 50 })),
+    q: Type.Optional(Type.String()),
+  },
+  { $id: 'DatasetRecordPageQuery' },
+);
+
+export const DatasetSnapshot = Type.Object(
+  {
+    id: Type.String(),
+    schemaVersion: Type.String(),
+    fingerprint: Type.String(),
+    recordCount: Type.Integer(),
+  },
+  { $id: 'DatasetSnapshot' },
+);
+
+export const DatasetRecordPage = Type.Object(
+  {
+    snapshot: Type.Object({
+      id: Type.String(),
+      schemaVersion: Type.String(),
+      fingerprint: Type.String(),
+      recordCount: Type.Integer(),
+    }),
+    items: Type.Array(Type.Ref(SourceRecord)),
+    nextCursor: Type.Optional(Type.String()),
+    total: Type.Integer(),
+  },
+  { $id: 'DatasetRecordPage' },
+);
+
+export const DatasetChangeSetRequest = Type.Object(
+  {
+    parentId: Type.Optional(Type.String({ minLength: 1 })),
+    // Разбор всей выгрузки даёт десятки тысяч действий: их решения и
+    // идентификаторы не помещаются в тело запроса, а интерфейс не может их
+    // осмысленно показать. Клиент берёт первые N записей и честно это пишет.
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
+  },
+  { $id: 'DatasetChangeSetRequest' },
+);
+
 export const ChangeSetDiffQuery = Type.Object(
   { against: Type.String({ minLength: 1 }) },
   { $id: 'ChangeSetDiffQuery' },
@@ -279,6 +350,12 @@ export const CHANGE_SET_SCHEMAS = [
   ChangeSetList,
   ChangeSetIdParams,
   ChangeSetListQuery,
+  ActionPageQuery,
+  ActionPage,
+  DatasetRecordPageQuery,
+  DatasetSnapshot,
+  DatasetRecordPage,
+  DatasetChangeSetRequest,
   ChangeSetDiffQuery,
   ActionDecisionUpdate,
   UpdateDecisionsRequest,

@@ -23,6 +23,7 @@ import {
 import { API_PREFIX, ErrorResponse } from './contracts/common.js';
 import { CHANGE_SET_SCHEMAS } from './contracts/change-set.js';
 import { EXPLANATION_SCHEMAS } from './contracts/explanation.js';
+import { EmptyExplanationScopeError } from './application/change-set-explanation-service.js';
 import { GroqExplanationProvider } from './infrastructure/groq-explanation-provider.js';
 import { v1Routes } from './routes/v1/index.js';
 
@@ -101,18 +102,26 @@ export async function buildApp(
   // наследует error handler по encapsulation-иерархии в момент регистрации.
   app.setErrorHandler((error: FastifyError, request, reply) => {
     let statusCode = error.statusCode ?? 500;
+    // Известные ошибки домена и приложения несут безопасный текст для
+    // пользователя. Маскируется только нераспознанное: иначе 503
+    // «AI не настроен» превращался во «Внутреннюю ошибку сервиса».
+    let known = true;
     if (error instanceof StoredChangeSetNotFoundError) statusCode = 404;
-    if (error instanceof UnknownStoredActionsError) statusCode = 422;
-    if (error instanceof ExplanationUnavailableError) statusCode = 503;
-    if (error instanceof ExplanationProviderError) statusCode = error.statusCode;
-    if (error instanceof InvalidChangeSetStateError || error instanceof ChangeSetConflictError) {
+    else if (error instanceof UnknownStoredActionsError) statusCode = 422;
+    else if (error instanceof ExplanationUnavailableError) statusCode = 503;
+    else if (error instanceof EmptyExplanationScopeError) statusCode = 422;
+    else if (error instanceof ExplanationProviderError) statusCode = error.statusCode;
+    else if (error instanceof InvalidChangeSetStateError || error instanceof ChangeSetConflictError) {
       statusCode = 409;
-    }
-    if (statusCode >= 500) request.log.error({ err: error }, 'unhandled error');
+    } else known = statusCode < 500;
+
+    if (!known) request.log.error({ err: error }, 'unhandled error');
+    else if (statusCode >= 500) request.log.warn({ err: error }, error.name);
+
     reply.code(statusCode).send({
       statusCode,
       error: error.name || 'Error',
-      message: statusCode >= 500 ? 'Внутренняя ошибка сервиса' : error.message,
+      message: known ? error.message : 'Внутренняя ошибка сервиса',
     });
   });
 

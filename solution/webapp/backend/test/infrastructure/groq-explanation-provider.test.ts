@@ -47,6 +47,45 @@ describe('Groq explanation adapter', () => {
     expect(request?.headers).toMatchObject({ authorization: 'Bearer test-key' });
   });
 
+  test('задача оператора отделена от недоверенного payload', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }), {
+        status: 200,
+      }),
+    );
+
+    await provider(fetchFn).explain({ ...payload, instruction: 'Покажи риски публикации' });
+
+    const body = JSON.parse(fetchFn.mock.calls[0]![1]?.body as string) as {
+      messages: { role: string; content: string }[];
+    };
+    const system = body.messages.find((message) => message.role === 'system')!.content;
+    const user = body.messages.find((message) => message.role === 'user')!.content;
+    const serialized = user.slice(user.indexOf('Payload:'));
+
+    expect(user).toContain('Задача оператора: Покажи риски публикации');
+    expect(system).toContain('Задача оператора');
+    // Инструкция не должна попадать в блок, объявленный недоверенными данными:
+    // иначе модель одновременно обязана ей следовать и не исполнять её.
+    expect(serialized).not.toContain('Покажи риски публикации');
+    expect(serialized).not.toContain('instruction');
+  });
+
+  test('без инструкции подставляется задача по умолчанию', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }), {
+        status: 200,
+      }),
+    );
+
+    await provider(fetchFn).explain(payload);
+
+    const body = JSON.parse(fetchFn.mock.calls[0]![1]?.body as string) as {
+      messages: { role: string; content: string }[];
+    };
+    expect(body.messages[1]!.content).toContain('Задача оператора: Объясни изменения');
+  });
+
   test('повторяет 429 и не включает тело провайдера в ошибку', async () => {
     const fetchFn = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('secret provider details', { status: 429 }))

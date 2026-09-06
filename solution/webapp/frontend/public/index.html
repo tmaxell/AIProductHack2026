@@ -136,6 +136,7 @@
     <header class="wp-header">
       <span class="wp-title">Project Launch Copilot</span>
       <span class="wp-header-actions">
+        <button class="btn-link compact" id="copilotToggle" type="button" onclick="openCopilot()">AI</button>
         <button class="btn-link compact" type="button" onclick="openVersions()">Версии</button>
         <button class="icon-btn" onclick="toggleWidget()" aria-label="Свернуть панель виджета">
           <svg class="ic"><use href="#i-close"/></svg>
@@ -143,7 +144,7 @@
       </span>
     </header>
 
-    <div class="wp-body">
+    <div class="wp-body" id="checkPanelBody">
       <!-- Состояние «до запуска» -->
       <section id="widgetIntro">
         <h2 class="wp-state-title">Проверка заявок</h2>
@@ -173,10 +174,32 @@
       </section>
     </div>
 
-    <div class="wp-actions">
+    <div class="wp-actions" id="checkPanelActions">
       <button class="btn-primary block" id="primaryBtn" onclick="runValidation()">Проверить данные</button>
       <button class="btn-link" id="secondaryBtn" type="button" onclick="openSettings()">Настройки проверки</button>
     </div>
+
+    <section class="copilot-panel" id="copilotPanel" hidden aria-label="AI Copilot">
+      <header class="copilot-head">
+        <div><b>AI Copilot</b><span id="copilotContext">Контекст не выбран</span></div>
+        <button class="icon-btn" type="button" onclick="closeCopilot()" aria-label="Закрыть AI Copilot"><svg class="ic"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="copilot-messages" id="copilotMessages" aria-live="polite">
+        <article class="copilot-message assistant">
+          <b>Чем помочь?</b>
+          <p>Запустите проверку или откройте версию — я объясню результаты всей выгрузки и подготовлю следующие шаги.</p>
+        </article>
+      </div>
+      <div class="copilot-suggestions">
+        <button type="button" onclick="askCopilot('Объясни основные проблемы и их масштаб')">Основные проблемы</button>
+        <button type="button" onclick="askCopilot('Покажи рискованные изменения и конфликты')">Риски</button>
+        <button type="button" onclick="askCopilot('Что нужно сделать перед публикацией?')">Перед публикацией</button>
+      </div>
+      <form class="copilot-compose" onsubmit="submitCopilot(event)">
+        <textarea id="copilotInput" rows="2" maxlength="500" placeholder="Спросить о данных и изменениях…" aria-label="Сообщение AI Copilot"></textarea>
+        <button class="btn-primary" id="copilotSend" type="submit">Отправить</button>
+      </form>
+    </section>
   </aside>
 
   <button class="widget-reopen" id="widgetReopen" type="button" hidden onclick="toggleWidget()">Project Launch Copilot</button>
@@ -297,26 +320,6 @@
     <footer class="m-foot">
       <span class="spacer"></span>
       <button class="btn-ghost" onclick="closeVersions()">Закрыть</button>
-    </footer>
-  </div>
-</div>
-
-<!-- ============ EXPLICIT AI CONSENT + RESULT MODAL ============ -->
-<div class="modal-overlay" id="aiModal">
-  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="aiTitle">
-    <header class="m-head">
-      <div>
-        <h2 class="m-title" id="aiTitle">AI-объяснение</h2>
-        <p class="settings-hint">Нажатие «AI-объяснение» запускает Groq. Модель не может применить или опубликовать изменения.</p>
-      </div>
-      <button class="icon-btn" onclick="closeAiExplanation()" aria-label="Закрыть AI-объяснение">
-        <svg class="ic"><use href="#i-close"/></svg>
-      </button>
-    </header>
-    <div class="m-body" id="aiBody"></div>
-    <footer class="m-foot">
-      <span class="spacer"></span>
-      <button class="btn-primary" onclick="closeAiExplanation()">Закрыть</button>
     </footer>
   </div>
 </div>

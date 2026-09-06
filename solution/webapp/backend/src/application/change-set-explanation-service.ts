@@ -10,7 +10,21 @@ import {
   type StoredExplanation,
 } from '../infrastructure/change-set-store.js';
 
-export const EXPLANATION_PROMPT_VERSION = 'change-set-explanation-v1';
+export const EXPLANATION_PROMPT_VERSION = 'change-set-copilot-v2';
+
+/**
+ * Набор действий можно задать областью, а не перечислением. На полной выгрузке
+ * в Change Set десятки тысяч действий, и список их идентификаторов не проходит
+ * ограничение размера тела запроса.
+ */
+export type ExplanationScope = 'accepted' | 'not-rejected';
+
+export class EmptyExplanationScopeError extends Error {
+  constructor(readonly scope: ExplanationScope) {
+    super(`В области «${scope}» нет действий для объяснения`);
+    this.name = 'EmptyExplanationScopeError';
+  }
+}
 
 export class ChangeSetExplanationService {
   constructor(
@@ -26,17 +40,46 @@ export class ChangeSetExplanationService {
     return this.provider?.model;
   }
 
-  preview(changeSetId: string, actionIds: readonly string[]): ExplanationPreview {
+  private resolve(
+    changeSetId: string,
+    selection: { actionIds?: readonly string[]; scope?: ExplanationScope },
+  ): { changeSet: ReturnType<SqliteChangeSetStore['require']>; actionIds: readonly string[] } {
     const changeSet = this.store.require(changeSetId);
-    const known = new Set(changeSet.actions.map((action) => action.id));
-    const unknown = actionIds.filter((actionId) => !known.has(actionId));
-    if (unknown.length > 0) throw new UnknownStoredActionsError(unknown);
-    return buildExplanationPreview(changeSet, actionIds);
+
+    if (selection.actionIds !== undefined) {
+      const known = new Set(changeSet.actions.map((action) => action.id));
+      const unknown = selection.actionIds.filter((actionId) => !known.has(actionId));
+      if (unknown.length > 0) throw new UnknownStoredActionsError(unknown);
+      return { changeSet, actionIds: selection.actionIds };
+    }
+
+    const scope = selection.scope ?? 'not-rejected';
+    const actionIds = changeSet.actions
+      .filter((action) =>
+        scope === 'accepted' ? action.decision === 'accepted' : action.decision !== 'rejected',
+      )
+      .map((action) => action.id);
+    if (actionIds.length === 0) throw new EmptyExplanationScopeError(scope);
+
+    return { changeSet, actionIds };
   }
 
-  async explain(changeSetId: string, actionIds: readonly string[]): Promise<StoredExplanation> {
+  preview(
+    changeSetId: string,
+    selection: { actionIds?: readonly string[]; scope?: ExplanationScope },
+    instruction?: string,
+  ): ExplanationPreview {
+    const { changeSet, actionIds } = this.resolve(changeSetId, selection);
+    return buildExplanationPreview(changeSet, actionIds, instruction);
+  }
+
+  async explain(
+    changeSetId: string,
+    selection: { actionIds?: readonly string[]; scope?: ExplanationScope },
+    instruction?: string,
+  ): Promise<StoredExplanation> {
     if (this.provider === undefined) throw new ExplanationUnavailableError();
-    const preview = this.preview(changeSetId, actionIds);
+    const preview = this.preview(changeSetId, selection, instruction);
     const attempt = this.store.createExplanation(
       changeSetId,
       this.provider.model,

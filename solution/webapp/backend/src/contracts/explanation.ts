@@ -1,9 +1,24 @@
 import { Type } from '@sinclair/typebox';
 import { ActionDecision, ActionResult, ChangeSetStatus, Confidence } from './change-set.js';
 
+export const ExplanationScope = Type.Union(
+  [Type.Literal('accepted'), Type.Literal('not-rejected')],
+  {
+    $id: 'ExplanationScope',
+    description: 'Область действий вместо их перечисления; по умолчанию not-rejected',
+  },
+);
+
 export const ExplanationRequest = Type.Object(
   {
-    actionIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true }),
+    // На полной выгрузке в Change Set десятки тысяч действий: перечисление их
+    // идентификаторов не проходит ограничение размера тела запроса, поэтому
+    // область можно задать через scope, а список — только для точечных выборок.
+    actionIds: Type.Optional(
+      Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true }),
+    ),
+    scope: Type.Optional(Type.Ref(ExplanationScope)),
+    instruction: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
   },
   { $id: 'ExplanationRequest' },
 );
@@ -30,6 +45,14 @@ export const ExplanationPayload = Type.Object({
     status: Type.Ref(ChangeSetStatus),
     isRollback: Type.Boolean(),
   }),
+  instruction: Type.Optional(Type.String()),
+  coverage: Type.Optional(Type.Object({
+    totalActions: Type.Integer(),
+    sampledActions: Type.Integer(),
+    byRule: Type.Record(Type.String(), Type.Integer()),
+    byDecision: Type.Record(Type.String(), Type.Integer()),
+    byResult: Type.Record(Type.String(), Type.Integer()),
+  })),
   actions: Type.Array(DisclosedAction),
 });
 
@@ -75,6 +98,7 @@ export const ExplanationList = Type.Object(
 );
 
 export const EXPLANATION_SCHEMAS = [
+  ExplanationScope,
   ExplanationRequest,
   ExplanationPreviewResponse,
   ExplanationList,

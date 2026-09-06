@@ -30,6 +30,14 @@ export interface ExplanationPayload {
     readonly status: VersionedChangeSet['status'];
     readonly isRollback: boolean;
   };
+  readonly instruction?: string;
+  readonly coverage?: {
+    readonly totalActions: number;
+    readonly sampledActions: number;
+    readonly byRule: Readonly<Record<string, number>>;
+    readonly byDecision: Readonly<Record<string, number>>;
+    readonly byResult: Readonly<Record<string, number>>;
+  };
   readonly actions: readonly DisclosedAction[];
 }
 
@@ -72,14 +80,68 @@ export function maskDisclosedValue(field: string, value: string | null): string 
   return value;
 }
 
+/** Сколько примеров действий уходит в модель. Агрегат coverage покрывает весь набор. */
+export const EXPLANATION_SAMPLE_LIMIT = 40;
+
+/**
+ * Примеры выбираются по кругу правил, а не подряд.
+ *
+ * Прежняя эвристика сортировала по ruleCode и брала первые 20 плюс по одному
+ * на каждое следующее правило. На полной выгрузке это давало 20 примеров
+ * алфавитно первого правила и по одному на остальные, то есть модель
+ * рассуждала о наборе по нерепрезентативной выборке. Заодно от этого страдал
+ * disclosure: поле fields перечисляет только те поля, значения которых реально
+ * ушли, и недосчитывало правила, не попавшие в выборку.
+ *
+ * Порядок детерминирован: правила по коду, действия внутри правила по id.
+ */
+function sampleByRule<T extends { readonly ruleCode: string; readonly id: string }>(
+  actions: readonly T[],
+  limit: number,
+): T[] {
+  if (actions.length <= limit) return [...actions];
+
+  const byRule = new Map<string, T[]>();
+  for (const action of [...actions].sort((left, right) => left.id.localeCompare(right.id))) {
+    const bucket = byRule.get(action.ruleCode);
+    if (bucket === undefined) byRule.set(action.ruleCode, [action]);
+    else bucket.push(action);
+  }
+
+  const buckets = [...byRule.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, bucket]) => bucket);
+
+  const picked: T[] = [];
+  for (let round = 0; picked.length < limit; round += 1) {
+    let added = false;
+    for (const bucket of buckets) {
+      const next = bucket[round];
+      if (next === undefined) continue;
+      picked.push(next);
+      added = true;
+      if (picked.length === limit) break;
+    }
+    if (!added) break;
+  }
+
+  return picked;
+}
+
 export function buildExplanationPreview(
   changeSet: VersionedChangeSet,
   actionIds: readonly string[],
+  instruction?: string,
 ): ExplanationPreview {
   const selected = new Set(actionIds);
   const recordRefs = new Map<string, string>();
-  const actions = changeSet.actions
-    .filter((action) => selected.has(action.id))
+  const selectedActions = changeSet.actions.filter((action) => selected.has(action.id));
+  const countBy = (key: 'ruleCode' | 'decision' | 'result'): Record<string, number> => {
+    const counts: Record<string, number> = {};
+    for (const action of selectedActions) counts[action[key]] = (counts[action[key]] ?? 0) + 1;
+    return counts;
+  };
+  const actions = sampleByRule(selectedActions, EXPLANATION_SAMPLE_LIMIT)
     .map((action, index): DisclosedAction => {
       let recordRef = recordRefs.get(action.recordId);
       if (recordRef === undefined) {
@@ -103,13 +165,23 @@ export function buildExplanationPreview(
       };
     });
   return {
-    actionIds: changeSet.actions.filter((action) => selected.has(action.id)).map((action) => action.id),
+    actionIds: selectedActions.map((action) => action.id),
     fields: [...new Set(actions.map((action) => action.field))].sort(),
     payload: {
       version: {
         sequence: changeSet.sequence,
         status: changeSet.status,
         isRollback: changeSet.rollbackOfId !== undefined,
+      },
+      ...(instruction === undefined || instruction.trim() === ''
+        ? {}
+        : { instruction: instruction.trim() }),
+      coverage: {
+        totalActions: selectedActions.length,
+        sampledActions: actions.length,
+        byRule: countBy('ruleCode'),
+        byDecision: countBy('decision'),
+        byResult: countBy('result'),
       },
       actions,
     },

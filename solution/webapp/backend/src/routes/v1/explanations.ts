@@ -18,6 +18,15 @@ function previewDto(preview: ExplanationPreview) {
     fields: [...preview.fields],
     payload: {
       version: { ...preview.payload.version },
+      ...(preview.payload.instruction === undefined ? {} : { instruction: preview.payload.instruction }),
+      ...(preview.payload.coverage === undefined ? {} : {
+        coverage: {
+          ...preview.payload.coverage,
+          byRule: { ...preview.payload.coverage.byRule },
+          byDecision: { ...preview.payload.coverage.byDecision },
+          byResult: { ...preview.payload.coverage.byResult },
+        },
+      }),
       actions: preview.payload.actions.map((action) => ({
         actionRef: action.actionRef,
         recordRef: action.recordRef,
@@ -87,7 +96,7 @@ export const explanationRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       available: fastify.explanations.available,
       ...(fastify.explanations.model === undefined ? {} : { model: fastify.explanations.model }),
       promptVersion: EXPLANATION_PROMPT_VERSION,
-      ...previewDto(fastify.explanations.preview(request.params.id, request.body.actionIds)),
+      ...previewDto(fastify.explanations.preview(request.params.id, request.body, request.body.instruction)),
     }),
   );
 
@@ -110,7 +119,7 @@ export const explanationRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       },
     },
     async (request) =>
-      explanationDto(await fastify.explanations.explain(request.params.id, request.body.actionIds)),
+      explanationDto(await fastify.explanations.explain(request.params.id, request.body, request.body.instruction)),
   );
 
   fastify.get(

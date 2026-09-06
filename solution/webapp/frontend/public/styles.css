@@ -197,6 +197,15 @@ table.grid tr.empty-row:hover td { background: var(--bg); }
 }
 .relation-node { width: 7px; height: 7px; border-radius: 50%; background: var(--purple); flex: none; }
 .relation-empty { color: var(--text-muted); font-size: 12px; }
+.relation-title { margin-top: 14px; }
+.relation-map { display: grid; gap: 7px; }
+.relation-map > div { display: grid; grid-template-columns: minmax(70px, 1fr) 24px minmax(105px, 1.4fr) auto; align-items: center; gap: 5px; }
+.relation-box { padding: 6px 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); font-size: 11px; text-align: center; }
+.relation-box.target { border-color: #CFC5F8; background: var(--purple-light); color: var(--purple-text); }
+.relation-box.warning { border-color: var(--amber-border); background: var(--amber-light); color: var(--amber); }
+.relation-arrow { text-align: center; color: var(--purple); font-weight: 700; }
+.relation-arrow.dashed { color: var(--amber); }
+.relation-map b { min-width: 24px; text-align: right; }
 
 .table-footer {
   flex: none; padding: 8px 16px;
@@ -279,6 +288,8 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
   border-left: 1px solid var(--border); background: var(--bg);
   display: flex; flex-direction: column; min-height: 0;
 }
+.widget-panel.copilot-open { width: min(430px, 42vw); }
+.btn-link.compact.active { background: var(--purple-light); color: var(--purple-text); font-weight: 600; }
 .wp-header {
   height: 52px; flex: none; padding: 0 8px 0 16px;
   display: flex; align-items: center; justify-content: space-between;
@@ -348,19 +359,15 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .diff-summary { display: flex; gap: 8px; margin-bottom: 12px; }
 .diff-summary span { padding: 7px 10px; border-radius: var(--r-card); background: var(--bg-work); }
 .version-grid { min-width: 720px; }
+.version-action-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; color: var(--text-muted); font-size: 12px; }
 .version-history-title { margin-top: 16px; }
 .version-events { border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }
 .version-events div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .version-events div:last-child { border-bottom: 0; }
 .version-events span { color: var(--text-muted); font-size: 12px; }
-.ai-consent { padding: 12px; border: 1px solid #CFC3FF; border-radius: var(--r-card); background: #F8F6FF; }
-.ai-consent > p { margin: 5px 0 12px; color: var(--text-muted); line-height: 1.5; }
-.ai-disclosure { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; margin: 7px 0; font-size: 12px; }
-.ai-disclosure span, .ai-result-meta { color: var(--text-muted); }
-.ai-preview-table { min-width: 600px; }
 .ai-history-title { margin-top: 18px; }
 .ai-result { border: 1px solid var(--border); border-radius: var(--r-card); padding: 14px; }
-.ai-result-meta { font-size: 11px; margin-bottom: 7px; }
+.ai-result-meta { font-size: 11px; margin-bottom: 7px; color: var(--text-muted); }
 .ai-summary { font-weight: 600; line-height: 1.5; margin-bottom: 12px; }
 .ai-section { margin-top: 12px; }
 .ai-section h3 { font-size: 12px; margin-bottom: 5px; }
@@ -369,6 +376,31 @@ input[type=checkbox] { accent-color: var(--purple); width: 16px; height: 16px; c
 .ai-error p { margin-top: 5px; }
 .ai-loading { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-muted); }
 .btn-primary:disabled:hover { background: #B9A9F7; }
+
+/* Контекстная AI-панель в духе Airtable Omni: чат остаётся рядом с таблицей. */
+.copilot-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #FBFAFF; }
+.copilot-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.copilot-head b { display: block; font-size: 14px; }
+.copilot-head span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; }
+.copilot-messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; }
+.copilot-message { max-width: 92%; margin-bottom: 12px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); line-height: 1.45; }
+.copilot-message.user { margin-left: auto; border-color: #D9D0FA; background: var(--purple-light); }
+.copilot-message.loading { display: flex; align-items: center; gap: 10px; color: var(--text-muted); }
+.copilot-message.error { border-color: var(--red-border); background: var(--red-light); color: var(--red); }
+.copilot-message .ai-result { border: 0; padding: 10px 0 0; }
+.copilot-coverage { padding: 9px 10px; border-radius: 8px; background: var(--green-light); color: var(--green); }
+.copilot-coverage span { display: block; margin-top: 3px; font-size: 11px; }
+.copilot-details { margin-top: 10px; color: var(--text-muted); font-size: 12px; }
+.copilot-details summary { cursor: pointer; color: var(--purple-text); }
+.copilot-details p, .copilot-details ul { margin-top: 7px; }
+.copilot-details ul { padding-left: 18px; }
+.copilot-result-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.copilot-followups, .copilot-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.copilot-followups button, .copilot-suggestions button { border: 1px solid #D9D0FA; border-radius: 999px; background: #F7F4FF; color: var(--purple-text); padding: 5px 9px; font: inherit; font-size: 11px; cursor: pointer; }
+.copilot-suggestions { padding: 0 14px 10px; margin-top: 0; }
+.copilot-compose { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--bg); }
+.copilot-compose textarea { resize: none; min-height: 54px; border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font: inherit; line-height: 1.4; }
+.copilot-compose .btn-primary { align-self: end; }
 
 .block-label { font-size: 12px; color: var(--text-muted); margin: 4px 0 8px; }
 .rule-list { border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }

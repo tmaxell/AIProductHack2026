@@ -99,7 +99,7 @@ describe('AI-объяснения сохранённого Change Set', () => {
     expect(response.json()).toMatchObject({
       status: 'completed',
       model: 'test-model',
-      promptVersion: 'change-set-explanation-v1',
+      promptVersion: 'change-set-copilot-v2',
       response: result,
     });
     expect(explain).toHaveBeenCalledOnce();
@@ -111,6 +111,37 @@ describe('AI-объяснения сохранённого Change Set', () => {
     expect(history.json<{ items: { type: string }[] }>().items.map((event) => event.type)).toEqual(
       expect.arrayContaining(['explanation.requested', 'explanation.completed']),
     );
+  });
+
+  test('область задаётся scope, а не перечислением действий', async () => {
+    const app = await makeApp();
+    apps.push(app);
+    const draft = await createDraft(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/change-sets/${draft.id}/explanation-preview`,
+      payload: { scope: 'not-rejected' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ actionIds: string[] }>();
+    expect(body.actionIds).toEqual(draft.actions.map((action) => action.id));
+  });
+
+  test('пустая область отклоняется с 422, а не уходит в модель', async () => {
+    const app = await makeApp();
+    apps.push(app);
+    const draft = await createDraft(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/change-sets/${draft.id}/explanation-preview`,
+      payload: { scope: 'accepted' },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ error: string }>().error).toBe('EmptyExplanationScopeError');
   });
 
   test('ошибка сохраняется, но не меняет статус Change Set', async () => {

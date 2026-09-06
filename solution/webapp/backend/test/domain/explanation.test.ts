@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { buildExplanationPreview, isExplanationOutput, maskDisclosedValue } from '../../src/domain/explanation.js';
+import {
+  buildExplanationPreview,
+  EXPLANATION_SAMPLE_LIMIT,
+  isExplanationOutput,
+  maskDisclosedValue,
+} from '../../src/domain/explanation.js';
 import type { VersionedChangeSet } from '../../src/domain/version.js';
 
 const version: VersionedChangeSet = {
@@ -52,7 +57,7 @@ describe('минимизация данных для AI-объяснения', (
   });
 
   test('раскрывает только выбранные действия и заменяет record id', () => {
-    const preview = buildExplanationPreview(version, ['real-row-id::email']);
+    const preview = buildExplanationPreview(version, ['real-row-id::email'], 'Покажи риски');
     expect(preview.fields).toEqual(['requester_email']);
     expect(preview.payload.actions).toHaveLength(1);
     expect(preview.payload.actions[0]).toMatchObject({
@@ -61,6 +66,59 @@ describe('минимизация данных для AI-объяснения', (
       after: '***@example.org',
     });
     expect(JSON.stringify(preview.payload)).not.toContain('real-row-id');
+    expect(preview.payload).toMatchObject({
+      instruction: 'Покажи риски',
+      coverage: { totalActions: 1, sampledActions: 1 },
+    });
+  });
+
+  test('примеры распределяются по правилам, а не берутся подряд', () => {
+    const rules = ['budget', 'company_email', 'company_phone', 'currency', 'priority', 'status'];
+    const many = {
+      ...version,
+      actions: rules.flatMap((ruleCode) =>
+        Array.from({ length: 100 }, (_, index) => ({
+          ...version.actions[0]!,
+          id: `${ruleCode}-${String(index).padStart(4, '0')}`,
+          recordId: `row-${ruleCode}-${index}`,
+          ruleCode,
+          field: ruleCode,
+        })),
+      ),
+    };
+
+    const preview = buildExplanationPreview(many, many.actions.map((action) => action.id));
+    const byRule = new Map<string, number>();
+    for (const action of preview.payload.actions) {
+      byRule.set(action.ruleCode, (byRule.get(action.ruleCode) ?? 0) + 1);
+    }
+
+    // Лимит выбирается полностью, каждое правило представлено, перекоса нет.
+    expect(preview.payload.actions).toHaveLength(EXPLANATION_SAMPLE_LIMIT);
+    expect(byRule.size).toBe(rules.length);
+    expect(Math.max(...byRule.values()) - Math.min(...byRule.values())).toBeLessThanOrEqual(1);
+
+    // Агрегат описывает весь набор, а не выборку.
+    expect(preview.payload.coverage).toMatchObject({ totalActions: 600, sampledActions: 40 });
+    // Disclosure перечисляет поля всех правил, попавших в выборку.
+    expect(preview.fields).toEqual([...rules].sort());
+  });
+
+  test('выборка детерминирована', () => {
+    const many = {
+      ...version,
+      actions: Array.from({ length: 200 }, (_, index) => ({
+        ...version.actions[0]!,
+        id: `action-${String(index).padStart(4, '0')}`,
+        recordId: `row-${index}`,
+        ruleCode: index % 2 === 0 ? 'budget' : 'status',
+      })),
+    };
+    const ids = () =>
+      buildExplanationPreview(many, many.actions.map((action) => action.id))
+        .payload.actions.map((action) => action.actionRef);
+
+    expect(ids()).toEqual(ids());
   });
 
   test('проверяет закрытый структурированный ответ', () => {

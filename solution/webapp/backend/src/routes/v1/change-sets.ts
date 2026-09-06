@@ -3,6 +3,8 @@ import { ErrorResponse } from '../../contracts/common.js';
 import {
   ApplyChangeSetRequest,
   ApplyChangeSetResponse,
+  ActionPage,
+  ActionPageQuery,
   ChangeSetDiff as ChangeSetDiffSchema,
   ChangeSetDiffQuery,
   ChangeSetHistory,
@@ -10,6 +12,10 @@ import {
   ChangeSetList,
   ChangeSetListQuery,
   CreateChangeSetRequest,
+  DatasetChangeSetRequest,
+  DatasetRecordPage,
+  DatasetRecordPageQuery,
+  DatasetSnapshot,
   PublishChangeSetRequest,
   PublishChangeSetResponse,
   StoredChangeSet,
@@ -21,6 +27,7 @@ import {
   type ChangeAction,
   type SourceRecord,
 } from '../../domain/change-set.js';
+import { fingerprint } from '../../domain/fingerprint.js';
 import type { VersionedAction, VersionedChangeSet } from '../../domain/version.js';
 
 interface RecordDto {
@@ -104,7 +111,103 @@ function toApplyDto(outcome: ApplyOutcome) {
   };
 }
 
+/** Текущее состояние тех записей выгрузки, которые разбирала указанная версия. */
+function snapshotScopeOf(
+  fastify: Parameters<FastifyPluginAsyncTypebox>[0],
+  changeSetId: string,
+): SourceRecord[] {
+  const analysed = new Set(fastify.changeSets.get(changeSetId).sourceRecords.map((record) => record.id));
+  return fastify.dataset.snapshot.records.filter((record) => analysed.has(record.id));
+}
+
+/** Публикация обновляет только разобранные записи, остальная выгрузка не трогается. */
+function mergeIntoSnapshot(
+  fastify: Parameters<FastifyPluginAsyncTypebox>[0],
+  updated: readonly SourceRecord[],
+): void {
+  const byId = new Map(updated.map((record) => [record.id, record]));
+  fastify.dataset.snapshot.records = fastify.dataset.snapshot.records.map(
+    (record) => byId.get(record.id) ?? record,
+  );
+  fastify.dataset.snapshot.fingerprint = fingerprint(fastify.dataset.snapshot.records);
+}
+
 export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
+  fastify.get(
+    '/dataset-snapshots/current',
+    {
+      schema: {
+        tags: ['dataset'],
+        summary: 'Получить метаданные полного snapshot выгрузки',
+        response: { 200: DatasetSnapshot },
+      },
+    },
+    () => ({
+      id: fastify.dataset.snapshot.id,
+      schemaVersion: fastify.dataset.snapshot.schemaVersion,
+      fingerprint: fastify.dataset.snapshot.fingerprint,
+      recordCount: fastify.dataset.snapshot.records.length,
+    }),
+  );
+
+  fastify.get(
+    '/dataset-snapshots/current/records',
+    {
+      schema: {
+        tags: ['dataset'],
+        summary: 'Читать полный snapshot стабильными страницами',
+        querystring: DatasetRecordPageQuery,
+        response: { 200: DatasetRecordPage },
+      },
+    },
+    (request) => {
+      const query = request.query.q?.trim().toLocaleLowerCase('ru-RU');
+      const filtered = query
+        ? fastify.dataset.snapshot.records.filter((record) =>
+            Object.values(record.values).some((value) =>
+              value?.toLocaleLowerCase('ru-RU').includes(query),
+            ),
+          )
+        : [...fastify.dataset.snapshot.records];
+      const cursorIndex = request.query.cursor === undefined
+        ? -1
+        : filtered.findIndex((record) => record.id === request.query.cursor);
+      const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
+      const limit = request.query.limit ?? 50;
+      const items = filtered.slice(start, start + limit);
+      const hasMore = start + items.length < filtered.length;
+      return {
+        snapshot: {
+          id: fastify.dataset.snapshot.id,
+          schemaVersion: fastify.dataset.snapshot.schemaVersion,
+          fingerprint: fastify.dataset.snapshot.fingerprint,
+          recordCount: fastify.dataset.snapshot.records.length,
+        },
+        items: toRecordDtos(items),
+        ...(hasMore && items.length ? { nextCursor: items[items.length - 1]!.id } : {}),
+        total: filtered.length,
+      };
+    },
+  );
+
+  fastify.post(
+    '/dataset-snapshots/current/change-sets',
+    {
+      schema: {
+        tags: ['dataset', 'change-sets'],
+        summary: 'Создать Change Set по всей актуальной выгрузке',
+        body: DatasetChangeSetRequest,
+        response: { 200: StoredChangeSet, 404: ErrorResponse },
+      },
+    },
+    (request) => {
+      const records = request.body.limit === undefined
+        ? fastify.dataset.snapshot.records
+        : fastify.dataset.snapshot.records.slice(0, request.body.limit);
+      return toStoredDto(fastify.changeSets.create(records, request.body.parentId));
+    },
+  );
+
   fastify.post(
     '/change-sets',
     {
@@ -147,6 +250,51 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       },
     },
     (request) => toStoredDto(fastify.changeSets.get(request.params.id)),
+  );
+
+  fastify.get(
+    '/change-sets/:id/actions',
+    {
+      schema: {
+        tags: ['change-sets'],
+        summary: 'Получить страницу действий версии с фильтрами и агрегатами',
+        params: ChangeSetIdParams,
+        querystring: ActionPageQuery,
+        response: { 200: ActionPage, 404: ErrorResponse },
+      },
+    },
+    (request) => {
+      const version = fastify.changeSets.get(request.params.id);
+      const needle = request.query.recordQuery?.trim().toLocaleLowerCase('ru-RU');
+      const filtered = version.actions.filter((action) =>
+        (request.query.ruleCode === undefined || action.ruleCode === request.query.ruleCode) &&
+        (request.query.decision === undefined || action.decision === request.query.decision) &&
+        (request.query.result === undefined || action.result === request.query.result) &&
+        (needle === undefined || action.recordId.toLocaleLowerCase('ru-RU').includes(needle)),
+      );
+      const cursorIndex = request.query.cursor === undefined
+        ? -1
+        : filtered.findIndex((action) => action.id === request.query.cursor);
+      const start = cursorIndex < 0 ? 0 : cursorIndex + 1;
+      const limit = request.query.limit ?? 50;
+      const items = filtered.slice(start, start + limit);
+      const countBy = (key: 'ruleCode' | 'decision' | 'result') => filtered.reduce<Record<string, number>>(
+        (result, action) => ({ ...result, [action[key]]: (result[action[key]] ?? 0) + 1 }),
+        {},
+      );
+      return {
+        items: items.map(toVersionedActionDto),
+        ...(start + items.length < filtered.length && items.length
+          ? { nextCursor: items[items.length - 1]!.id }
+          : {}),
+        total: filtered.length,
+        aggregates: {
+          byRule: countBy('ruleCode'),
+          byDecision: countBy('decision'),
+          byResult: countBy('result'),
+        },
+      };
+    },
   );
 
   fastify.patch(
@@ -245,6 +393,30 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
   );
 
   fastify.post(
+    '/change-sets/:id/publish-current',
+    {
+      schema: {
+        tags: ['dataset', 'change-sets'],
+        summary: 'Опубликовать draft относительно полного backend snapshot',
+        params: ChangeSetIdParams,
+        response: { 200: PublishChangeSetResponse, 404: ErrorResponse, 409: ErrorResponse },
+      },
+    },
+    (request) => {
+      // Версия могла разбирать только часть выгрузки, поэтому публикуем против
+      // того же подмножества: иначе отпечаток не совпадёт и всё упрётся в конфликт.
+      const scope = snapshotScopeOf(fastify, request.params.id);
+      const outcome = fastify.changeSets.publish(request.params.id, scope);
+      if (!outcome.idempotent) mergeIntoSnapshot(fastify, outcome.records);
+      return {
+        changeSet: toStoredDto(outcome.changeSet),
+        records: toRecordDtos(outcome.records),
+        idempotent: outcome.idempotent,
+      };
+    },
+  );
+
+  fastify.post(
     '/change-sets/:id/rollback',
     {
       schema: {
@@ -260,6 +432,21 @@ export const changeSetRoutes: FastifyPluginAsyncTypebox = (fastify) => {
       toStoredDto(
         fastify.changeSets.createRollback(request.params.id, toDomain(request.body.records)),
       ),
+  );
+
+  fastify.post(
+    '/change-sets/:id/rollback-current',
+    {
+      schema: {
+        tags: ['dataset', 'change-sets'],
+        summary: 'Создать rollback-draft относительно полного backend snapshot',
+        params: ChangeSetIdParams,
+        response: { 200: StoredChangeSet, 404: ErrorResponse, 409: ErrorResponse },
+      },
+    },
+    (request) => toStoredDto(
+      fastify.changeSets.createRollback(request.params.id, snapshotScopeOf(fastify, request.params.id)),
+    ),
   );
 
   fastify.post(
