@@ -7,7 +7,7 @@ import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { AppConfig } from './config.js';
 import { API_PREFIX, ErrorResponse } from './contracts/common.js';
-import { VALIDATION_SCHEMAS } from './contracts/validation.js';
+import { CHANGE_SET_SCHEMAS } from './contracts/change-set.js';
 import { v1Routes } from './routes/v1/index.js';
 
 declare module 'fastify' {
@@ -40,7 +40,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   }
 
   app.addSchema(ErrorResponse);
-  for (const schema of VALIDATION_SCHEMAS) app.addSchema(schema);
+  for (const schema of CHANGE_SET_SCHEMAS) app.addSchema(schema);
 
   if (config.exposeDocs) {
     await app.register(swagger, {
