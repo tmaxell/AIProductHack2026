@@ -12,6 +12,8 @@ export interface AppConfig {
   readonly exposeDocs: boolean;
   /** Демонстрационный набор данных со справочниками; пустая строка отключает сопоставление. */
   readonly datasetPath: string;
+  /** SQLite-файл с версиями Change Set; :memory: используется в тестах. */
+  readonly storagePath: string;
 }
 
 const ENVS = ['development', 'production', 'test'] as const;
@@ -59,5 +61,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .filter(Boolean),
     exposeDocs: (env.APP_EXPOSE_DOCS ?? String(appEnv !== 'production')) === 'true',
     datasetPath: env.APP_DATASET_PATH ?? '/app/data/raw/dev-sample.csv',
+    storagePath:
+      env.APP_STORAGE_PATH ?? (appEnv === 'test' ? ':memory:' : './var/change-sets.sqlite'),
   };
 }

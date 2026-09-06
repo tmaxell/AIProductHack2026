@@ -12,6 +12,7 @@ export const HealthResponse = Type.Object(
     knownApplications: Type.Integer({
       description: 'Размер корпуса заявок для поиска дублей; 0 — поиск дублей недоступен',
     }),
+    storedChangeSets: Type.Integer({ description: 'Количество сохранённых версий Change Set' }),
   },
   { $id: 'HealthResponse' },
 );

@@ -5,8 +5,15 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import { ChangeSetConflictError, ChangeSetService } from './application/change-set-service.js';
 import type { AppConfig } from './config.js';
 import { loadDataset, type Dataset } from './infrastructure/dataset-file.js';
+import {
+  InvalidChangeSetStateError,
+  SqliteChangeSetStore,
+  StoredChangeSetNotFoundError,
+  UnknownStoredActionsError,
+} from './infrastructure/change-set-store.js';
 import { API_PREFIX, ErrorResponse } from './contracts/common.js';
 import { CHANGE_SET_SCHEMAS } from './contracts/change-set.js';
 import { v1Routes } from './routes/v1/index.js';
@@ -16,6 +23,7 @@ declare module 'fastify' {
     appConfig: AppConfig;
     appVersion: string;
     dataset: Dataset;
+    changeSets: ChangeSetService;
   }
 }
 
@@ -38,6 +46,12 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     'dataset',
     await loadDataset(config.datasetPath, (message: string) => { app.log.info(message); }),
   );
+  const changeSetStore = new SqliteChangeSetStore(config.storagePath);
+  app.decorate('changeSets', new ChangeSetService(changeSetStore, app.dataset));
+  app.addHook('onClose', () => {
+    changeSetStore.close();
+    return Promise.resolve();
+  });
 
   await app.register(helmet, { contentSecurityPolicy: false });
 
@@ -47,6 +61,23 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
   app.addSchema(ErrorResponse);
   for (const schema of CHANGE_SET_SCHEMAS) app.addSchema(schema);
+
+  // Обработчик задаётся до регистрации дочерних route-плагинов: Fastify
+  // наследует error handler по encapsulation-иерархии в момент регистрации.
+  app.setErrorHandler((error: FastifyError, request, reply) => {
+    let statusCode = error.statusCode ?? 500;
+    if (error instanceof StoredChangeSetNotFoundError) statusCode = 404;
+    if (error instanceof UnknownStoredActionsError) statusCode = 422;
+    if (error instanceof InvalidChangeSetStateError || error instanceof ChangeSetConflictError) {
+      statusCode = 409;
+    }
+    if (statusCode >= 500) request.log.error({ err: error }, 'unhandled error');
+    reply.code(statusCode).send({
+      statusCode,
+      error: error.name || 'Error',
+      message: statusCode >= 500 ? 'Внутренняя ошибка сервиса' : error.message,
+    });
+  });
 
   if (config.exposeDocs) {
     await app.register(swagger, {
@@ -74,17 +105,6 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
       message: `Маршрут ${request.method} ${request.url} не найден`,
     }),
   );
-
-  app.setErrorHandler((error: FastifyError, request, reply) => {
-    const statusCode = error.statusCode ?? 500;
-    if (statusCode >= 500) request.log.error({ err: error }, 'unhandled error');
-    reply.code(statusCode).send({
-      statusCode,
-      error: error.name || 'Error',
-      // Внутренние детали наружу не отдаём.
-      message: statusCode >= 500 ? 'Внутренняя ошибка сервиса' : error.message,
-    });
-  });
 
   return app;
 }

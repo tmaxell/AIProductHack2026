@@ -88,7 +88,10 @@ export const ChangeSet = Type.Object(
 );
 
 export const CreateChangeSetRequest = Type.Object(
-  { records: Type.Array(Type.Ref(SourceRecord), { minItems: 1 }) },
+  {
+    records: Type.Array(Type.Ref(SourceRecord), { minItems: 1 }),
+    parentId: Type.Optional(Type.String({ minLength: 1 })),
+  },
   { $id: 'CreateChangeSetRequest' },
 );
 
@@ -120,6 +123,144 @@ export const ApplyChangeSetResponse = Type.Object(
   { $id: 'ApplyChangeSetResponse' },
 );
 
+export const ChangeSetStatus = Type.Union(
+  [
+    Type.Literal('draft'),
+    Type.Literal('published'),
+    Type.Literal('superseded'),
+    Type.Literal('discarded'),
+  ],
+  { $id: 'ChangeSetStatus' },
+);
+
+export const ActionDecision = Type.Union(
+  [Type.Literal('pending'), Type.Literal('accepted'), Type.Literal('rejected')],
+  { $id: 'ActionDecision' },
+);
+
+export const ActionResult = Type.Union(
+  [
+    Type.Literal('pending'),
+    Type.Literal('applied'),
+    Type.Literal('skipped'),
+    Type.Literal('conflict'),
+    Type.Literal('failed'),
+  ],
+  { $id: 'ActionResult' },
+);
+
+export const VersionedChangeAction = Type.Intersect(
+  [
+    Type.Ref(ChangeAction),
+    Type.Object({
+      decision: Type.Ref(ActionDecision),
+      editedAfter: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+      result: Type.Ref(ActionResult),
+      resultMessage: Type.Optional(Type.String()),
+      executedAt: Type.Optional(Type.String({ format: 'date-time' })),
+    }),
+  ],
+);
+
+export const StoredChangeSet = Type.Object(
+  {
+    id: Type.String(),
+    sequence: Type.Integer({ minimum: 1 }),
+    status: Type.Ref(ChangeSetStatus),
+    sourceFingerprint: Type.String(),
+    createdAt: Type.String({ format: 'date-time' }),
+    updatedAt: Type.String({ format: 'date-time' }),
+    publishedAt: Type.Optional(Type.String({ format: 'date-time' })),
+    parentId: Type.Optional(Type.String()),
+    rollbackOfId: Type.Optional(Type.String()),
+    actions: Type.Array(VersionedChangeAction),
+    issues: Type.Array(Type.Ref(RecordIssue)),
+    summary: Type.Ref(ChangeSetSummary),
+  },
+);
+
+export const ChangeSetList = Type.Object(
+  { items: Type.Array(StoredChangeSet) },
+  { $id: 'ChangeSetList' },
+);
+
+export const ChangeSetIdParams = Type.Object(
+  { id: Type.String({ minLength: 1 }) },
+  { $id: 'ChangeSetIdParams' },
+);
+
+export const ChangeSetListQuery = Type.Object(
+  { status: Type.Optional(Type.Ref(ChangeSetStatus)) },
+  { $id: 'ChangeSetListQuery' },
+);
+
+export const ChangeSetDiffQuery = Type.Object(
+  { against: Type.String({ minLength: 1 }) },
+  { $id: 'ChangeSetDiffQuery' },
+);
+
+export const ActionDecisionUpdate = Type.Object(
+  {
+    actionId: Type.String({ minLength: 1 }),
+    decision: Type.Ref(ActionDecision),
+    editedAfter: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  },
+  { $id: 'ActionDecisionUpdate' },
+);
+
+export const UpdateDecisionsRequest = Type.Object(
+  { actions: Type.Array(Type.Ref(ActionDecisionUpdate), { minItems: 1 }) },
+  { $id: 'UpdateDecisionsRequest' },
+);
+
+export const PublishChangeSetRequest = Type.Object(
+  { records: Type.Array(Type.Ref(SourceRecord), { minItems: 1 }) },
+  { $id: 'PublishChangeSetRequest' },
+);
+
+export const PublishChangeSetResponse = Type.Object(
+  {
+    changeSet: StoredChangeSet,
+    records: Type.Array(Type.Ref(SourceRecord)),
+    idempotent: Type.Boolean(),
+  },
+  { $id: 'PublishChangeSetResponse' },
+);
+
+export const ChangeSetEvent = Type.Object(
+  {
+    id: Type.Integer(),
+    changeSetId: Type.String(),
+    type: Type.String(),
+    createdAt: Type.String({ format: 'date-time' }),
+    payload: Type.Record(Type.String(), Type.Unknown()),
+  },
+);
+
+export const ChangeSetHistory = Type.Object(
+  { items: Type.Array(ChangeSetEvent) },
+  { $id: 'ChangeSetHistory' },
+);
+
+export const ActionDiff = Type.Object(
+  {
+    key: Type.String(),
+    before: Type.Optional(VersionedChangeAction),
+    after: Type.Optional(VersionedChangeAction),
+  },
+);
+
+export const ChangeSetDiff = Type.Object(
+  {
+    baseId: Type.String(),
+    targetId: Type.String(),
+    added: Type.Array(ActionDiff),
+    removed: Type.Array(ActionDiff),
+    changed: Type.Array(ActionDiff),
+  },
+  { $id: 'ChangeSetDiff' },
+);
+
 export const CHANGE_SET_SCHEMAS = [
   SourceRecord,
   IssueSeverity,
@@ -132,6 +273,19 @@ export const CHANGE_SET_SCHEMAS = [
   ApplyChangeSetRequest,
   SkippedAction,
   ApplyChangeSetResponse,
+  ChangeSetStatus,
+  ActionDecision,
+  ActionResult,
+  ChangeSetList,
+  ChangeSetIdParams,
+  ChangeSetListQuery,
+  ChangeSetDiffQuery,
+  ActionDecisionUpdate,
+  UpdateDecisionsRequest,
+  PublishChangeSetRequest,
+  PublishChangeSetResponse,
+  ChangeSetHistory,
+  ChangeSetDiff,
 ];
 
 export type SourceRecordDto = Static<typeof SourceRecord>;
