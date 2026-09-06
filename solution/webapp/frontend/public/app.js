@@ -15,6 +15,7 @@ let isRunning = false;       // проверка выполняется прям
 let applyMode = false;       // нормализации применены к данным
 let reportRules = [];        // правила текущего отчёта
 let reportRuleIndex = 0;
+let acceptedChanges = new Set(); // подтверждённые пользователем предложения
 let lastRunSummary = null;   // {ok, total, duplicateClusters, duplicateMembers} из последнего прогона
 
 // Снимок фактически применённых изменений: нужен, чтобы состояние
@@ -321,6 +322,7 @@ function collectRuleChanges() {
       const meta = RULE_META.find(r => r.field === c.field);
       if (!meta) return;
       ruleMap[meta.key].items.push({
+        id: row.row_id + '::' + c.field,
         row_id: row.row_id,
         application_id: row.application_id,
         field: c.field,
@@ -551,6 +553,7 @@ function runValidation() {
     hasRun = true;
     validateAll();
     reportRules = collectRuleChanges();
+    acceptedChanges = new Set(reportRules.flatMap(rule => rule.items.map(change => change.id)));
     isRunning = false;
     renderTable();
     renderWidget();
@@ -560,18 +563,25 @@ function runValidation() {
 /* ---------- применение и откат ---------- */
 
 function applyNormalizations() {
-  appliedSnapshot = collectRuleChanges();
+  appliedSnapshot = reportRules
+    .map(rule => ({ ...rule, items: rule.items.filter(change => acceptedChanges.has(change.id)) }))
+    .filter(rule => rule.items.length > 0);
   const touched = new Set();
   let applied = 0;
 
   scope.forEach(row => {
     (row._validationChanges || []).forEach(c => {
+      const id = row.row_id + '::' + c.field;
+      const selected = c.hidden
+        ? c.field === 'duplicate_group_id' && acceptedChanges.has(row.row_id + '::duplicate_link')
+        : acceptedChanges.has(id);
+      if (!selected) return;
       if (row[c.field] === c.to) return;
       row._prevValues = row._prevValues || {};
       if (!(c.field in row._prevValues)) row._prevValues[c.field] = c.from;
       row[c.field] = c.to;
       touched.add(row.row_id);
-      applied++;
+      if (!c.hidden) applied++;
     });
   });
 
@@ -599,6 +609,7 @@ function resetNormalizations() {
   appliedRecordCount = 0;
   validateAll();
   reportRules = collectRuleChanges();
+  acceptedChanges = new Set(reportRules.flatMap(rule => rule.items.map(change => change.id)));
   renderTable();
   renderWidget();
   showToast('Изменения отменены, значения возвращены к исходным');
@@ -612,6 +623,35 @@ function openReport() {
   document.getElementById('reportModal').classList.add('show');
   renderReportPage();
   document.getElementById('reportApplyBtn').focus();
+}
+
+function toggleAction(id) {
+  if (acceptedChanges.has(id)) acceptedChanges.delete(id);
+  else acceptedChanges.add(id);
+  renderReportPage();
+}
+
+function toggleRuleActions(checkbox) {
+  const rule = reportRules[reportRuleIndex];
+  rule.items.forEach(change => {
+    if (checkbox.checked) acceptedChanges.add(change.id);
+    else acceptedChanges.delete(change.id);
+  });
+  renderReportPage();
+}
+
+function renderReportFooter() {
+  const total = reportRules.reduce((sum, rule) => sum + rule.items.length, 0);
+  const selected = reportRules.reduce(
+    (sum, rule) => sum + rule.items.filter(change => acceptedChanges.has(change.id)).length,
+    0
+  );
+  document.getElementById('reportSelection').textContent =
+    applyMode ? '' : 'Подтверждено ' + selected + ' из ' + total;
+  const button = document.getElementById('reportApplyBtn');
+  button.hidden = applyMode;
+  button.disabled = selected === 0;
+  button.textContent = selected ? 'Применить ' + selected : 'Применить';
 }
 
 function closeReport() {
@@ -641,15 +681,31 @@ function renderReportPage() {
     '<p class="report-reason">' + escapeHtml(meta.reason) + '</p>' +
     '<p class="report-count">' + count + ' ' + recordsWord(count) + '</p>';
 
+  const selectedInRule = rule.items.filter(change => acceptedChanges.has(change.id)).length;
+  document.getElementById('reportHead').innerHTML =
+    '<tr>' +
+    '<th class="col-check"><input type="checkbox" id="ruleCheckAll" ' +
+      (selectedInRule === count ? 'checked ' : '') +
+      (applyMode ? 'disabled ' : '') +
+      'aria-label="Подтвердить все изменения этого правила" onchange="toggleRuleActions(this)"></th>' +
+    '<th class="col-app">Заявка</th><th>Было</th><th>Стало</th></tr>';
+  const ruleCheckAll = document.getElementById('ruleCheckAll');
+  ruleCheckAll.indeterminate = selectedInRule > 0 && selectedInRule < count;
+
   const tbody = document.getElementById('reportTableBody');
   tbody.innerHTML = '';
   rule.items.forEach(ch => {
     const tr = document.createElement('tr');
+    if (!acceptedChanges.has(ch.id)) tr.classList.add('declined');
     const confTitle = (ch.confidence === null || ch.confidence === undefined)
       ? ''
       : ' (уверенность движка ' + Math.round(ch.confidence * 100) + '%)';
     const toShown = ch.toDisplay || ch.to;
     tr.innerHTML =
+      '<td class="col-check"><input type="checkbox" ' + (acceptedChanges.has(ch.id) ? 'checked ' : '') +
+        (applyMode ? 'disabled ' : '') +
+        'aria-label="Подтвердить изменение поля ' + escapeHtml(ch.field) + ' для заявки ' + escapeHtml(ch.application_id || ch.row_id) + '" ' +
+        'onchange="toggleAction(\'' + ch.id + '\')"></td>' +
       '<td class="col-app" title="' + escapeHtml(ch.application_id || ch.row_id) + '">' + escapeHtml(ch.application_id || ch.row_id) + '</td>' +
       '<td class="cell-from" title="' + escapeHtml(ch.from) + '">' + escapeHtml(ch.from || '—') + '</td>' +
       '<td class="cell-to" title="' + escapeHtml(toShown) + confTitle + '">' + escapeHtml(toShown || '—') + '</td>';
@@ -659,10 +715,7 @@ function renderReportPage() {
   document.getElementById('reportPrev').disabled = page <= 1;
   document.getElementById('reportNext').disabled = page >= total;
 
-  const applyBtn = document.getElementById('reportApplyBtn');
-  const totalChanges = rules.reduce((a, r) => a + r.items.length, 0);
-  applyBtn.hidden = applyMode;
-  applyBtn.textContent = 'Применить все ' + totalChanges;
+  renderReportFooter();
 }
 
 function reportPrev() { if (reportRuleIndex > 0) { reportRuleIndex--; renderReportPage(); } }

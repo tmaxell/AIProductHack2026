@@ -178,13 +178,7 @@
       <div id="reportRuleBody"></div>
       <div class="report-table-wrap">
         <table class="grid report-grid" aria-label="Изменения по правилу">
-          <thead>
-            <tr>
-              <th class="col-app">Заявка</th>
-              <th>Было</th>
-              <th>Стало</th>
-            </tr>
-          </thead>
+          <thead id="reportHead"></thead>
           <tbody id="reportTableBody"></tbody>
         </table>
       </div>
@@ -199,9 +193,10 @@
           <svg class="ic"><use href="#i-next"/></svg>
         </button>
       </div>
+      <span class="pager-selection" id="reportSelection"></span>
       <span class="spacer"></span>
       <button class="btn-ghost" onclick="closeReport()">Закрыть</button>
-      <button class="btn-primary" id="reportApplyBtn" onclick="applyFromReport()">Применить все</button>
+      <button class="btn-primary" id="reportApplyBtn" onclick="applyFromReport()">Применить</button>
     </footer>
   </div>
 </div>
