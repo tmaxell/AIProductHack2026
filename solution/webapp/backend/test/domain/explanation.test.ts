@@ -121,6 +121,57 @@ describe('минимизация данных для AI-объяснения', (
     expect(ids()).toEqual(ids());
   });
 
+  // Регрессия: значение duplicate_of — это row_id другой заявки, и оно уходило
+  // в модель как есть, хотя ADR обещает заменять идентификаторы псевдонимами.
+  test('ссылки на другие записи тоже становятся псевдонимами', () => {
+    const withRefs = {
+      ...version,
+      actions: [
+        {
+          ...version.actions[0]!,
+          id: 'dup',
+          recordId: 'real-row-id',
+          field: 'duplicate_of',
+          kind: 'duplicate' as const,
+          before: null,
+          after: 'other-real-row-id',
+        },
+        {
+          ...version.actions[0]!,
+          id: 'match',
+          recordId: 'real-row-id',
+          field: 'company_ref_id',
+          kind: 'match' as const,
+          before: null,
+          after: 'CMP-REAL-42',
+        },
+      ],
+    };
+
+    const preview = buildExplanationPreview(withRefs, ['dup', 'match']);
+    const serialized = JSON.stringify(preview.payload);
+
+    expect(serialized).not.toContain('other-real-row-id');
+    expect(serialized).not.toContain('CMP-REAL-42');
+    expect(serialized).not.toContain('real-row-id');
+    expect(preview.payload.actions[0]?.after).toMatch(/^record-\d+$/);
+    expect(preview.payload.actions[1]?.after).toMatch(/^company-\d+$/);
+  });
+
+  test('одна и та же запись получает один псевдоним', () => {
+    const shared = {
+      ...version,
+      actions: [
+        { ...version.actions[0]!, id: 'a', recordId: 'row-1', field: 'duplicate_of', after: 'row-2' },
+        { ...version.actions[0]!, id: 'b', recordId: 'row-2', field: 'requester_email', after: 'x@y.z' },
+      ],
+    };
+
+    const preview = buildExplanationPreview(shared, ['a', 'b']);
+    // row-2 упомянута и как ссылка, и как сама запись — псевдоним должен совпасть.
+    expect(preview.payload.actions[0]?.after).toBe(preview.payload.actions[1]?.recordRef);
+  });
+
   test('проверяет закрытый структурированный ответ', () => {
     const valid = { summary: 'ok', evidence: [], risks: [], openQuestions: [], recommendedActions: [] };
     expect(isExplanationOutput(valid)).toBe(true);

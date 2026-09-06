@@ -128,6 +128,14 @@ function sampleByRule<T extends { readonly ruleCode: string; readonly id: string
   return picked;
 }
 
+/**
+ * Поля, значение которых — идентификатор другой записи пространства. Их нельзя
+ * маскировать по шаблону значения: наружу должен уходить тот же псевдоним,
+ * которым обозначена сама запись.
+ */
+const RECORD_REF_FIELDS = new Set(['duplicate_of']);
+const COMPANY_REF_FIELDS = new Set(['company_ref_id']);
+
 export function buildExplanationPreview(
   changeSet: VersionedChangeSet,
   actionIds: readonly string[],
@@ -135,6 +143,24 @@ export function buildExplanationPreview(
 ): ExplanationPreview {
   const selected = new Set(actionIds);
   const recordRefs = new Map<string, string>();
+  const companyRefs = new Map<string, string>();
+
+  const pseudonym = (refs: Map<string, string>, prefix: string, id: string): string => {
+    let ref = refs.get(id);
+    if (ref === undefined) {
+      ref = `${prefix}-${refs.size + 1}`;
+      refs.set(id, ref);
+    }
+    return ref;
+  };
+
+  /** Ссылка на запись заменяется псевдонимом, обычное значение маскируется. */
+  const disclose = (field: string, value: string | null): string | null => {
+    if (value === null || value === '') return maskDisclosedValue(field, value);
+    if (RECORD_REF_FIELDS.has(field)) return pseudonym(recordRefs, 'record', value);
+    if (COMPANY_REF_FIELDS.has(field)) return pseudonym(companyRefs, 'company', value);
+    return maskDisclosedValue(field, value);
+  };
   const selectedActions = changeSet.actions.filter((action) => selected.has(action.id));
   const countBy = (key: 'ruleCode' | 'decision' | 'result'): Record<string, number> => {
     const counts: Record<string, number> = {};
@@ -143,21 +169,16 @@ export function buildExplanationPreview(
   };
   const actions = sampleByRule(selectedActions, EXPLANATION_SAMPLE_LIMIT)
     .map((action, index): DisclosedAction => {
-      let recordRef = recordRefs.get(action.recordId);
-      if (recordRef === undefined) {
-        recordRef = `record-${recordRefs.size + 1}`;
-        recordRefs.set(action.recordId, recordRef);
-      }
       return {
         actionRef: `action-${index + 1}`,
-        recordRef,
+        recordRef: pseudonym(recordRefs, 'record', action.recordId),
         kind: action.kind,
         field: action.field,
         ruleCode: action.ruleCode,
         ruleName: action.ruleName,
         reason: action.reason,
-        before: maskDisclosedValue(action.field, action.before),
-        after: maskDisclosedValue(action.field, action.editedAfter ?? action.after),
+        before: disclose(action.field, action.before),
+        after: disclose(action.field, action.editedAfter ?? action.after),
         decision: action.decision,
         result: action.result,
         ...(action.confidence === undefined ? {} : { confidence: action.confidence }),
