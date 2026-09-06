@@ -1,17 +1,19 @@
 # Backend веб-приложения
 
-Fastify 5 + TypeScript, Node.js 22+. Внешних сервисов и базы данных нет.
+Fastify 5 + TypeScript, Node.js 22+. Версии Change Set хранятся в локальном
+SQLite-файле; внешних сервисов нет.
 
 ## Слои
 
 ```text
 src/
+├── application/  # сценарии версий, публикации и rollback
 ├── index.ts        # точка входа: старт сервера и graceful shutdown
 ├── app.ts          # buildApp(): плагины, схемы, маршруты, обработка ошибок
 ├── config.ts       # чтение и валидация переменных окружения
 ├── contracts/      # TypeBox-схемы = одновременно валидация, OpenAPI и типы
 ├── routes/v1/      # HTTP-слой: только разбор запроса и вызов домена
-├── infrastructure/ # ввод-вывод: чтение CSV и загрузка справочника
+├── infrastructure/ # CSV, SQLite-репозиторий и миграции
 └── domain/         # чистая логика без HTTP, см. domain/README.md
 ```
 
@@ -38,17 +40,31 @@ npm run build      # компиляция в dist/
 |---|---|---|
 | `GET` | `/api/v1/health` | состояние сервиса, используется healthcheck'ом |
 | `POST` | `/api/v1/change-sets` | проанализировать записи, вернуть черновик набора изменений |
-| `POST` | `/api/v1/change-sets/apply` | применить подтверждённые действия |
+| `GET` | `/api/v1/change-sets` | список сохранённых версий |
+| `GET` | `/api/v1/change-sets/:id` | версия с решениями и результатами действий |
+| `PATCH` | `/api/v1/change-sets/:id/decisions` | сохранить решения и отредактированные target-значения draft |
+| `GET` | `/api/v1/change-sets/:id/history` | append-only события версии |
+| `GET` | `/api/v1/change-sets/:id/diff?against=…` | сравнить две версии |
+| `POST` | `/api/v1/change-sets/:id/publish` | опубликовать accepted-действия |
+| `POST` | `/api/v1/change-sets/:id/rollback` | создать компенсирующий rollback-draft |
+| `POST` | `/api/v1/change-sets/:id/discard` | отбросить draft без удаления истории |
+| `POST` | `/api/v1/change-sets/apply` | deprecated stateless selective apply для совместимости |
 | `GET` | `/api/v1/docs` | Swagger UI, только при `APP_EXPOSE_DOCS=true` |
 
-`POST /change-sets` ничего не изменяет и возвращает два вида действий:
+`POST /change-sets` не меняет исходные записи, сохраняет draft и возвращает три вида действий:
 исправления формата (`kind: normalize`) и предложенные связи со справочником
-компаний (`kind: match`, с уровнем уверенности и перечнем совпавших признаков).
+компаний (`kind: match`, с уровнем уверенности и перечнем совпавших признаков),
+а также ссылки на возможные дубли (`kind: duplicate`).
 
-`POST /change-sets` ничего не изменяет. `POST /change-sets/apply` применяет
-только действия из `actionIds` и требует `sourceFingerprint` из черновика:
-если исходные данные изменились после анализа, операция отклоняется `409`,
-а не выполняется поверх устаревшего набора. Действие вне набора — `422`.
+Публикация применяет только действия с решением `accepted` и проверяет
+сохранённый `sourceFingerprint`: если данные изменились после анализа, операция
+отклоняется `409`, а конфликт сохраняется в истории. Повторная публикация
+возвращает сохранённый результат. Опубликованная версия неизменяема; rollback
+создаёт новый draft с обратными действиями и тоже требует подтверждения.
+
+SQLite открывается по `APP_STORAGE_PATH`. На старте backend транзакционно
+выполняет пронумерованные forward-only миграции. В Docker каталог смонтирован в
+named volume `change-set-storage`; `docker compose down -v` удаляет историю.
 
 ## Справочник компаний
 
