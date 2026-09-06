@@ -9,6 +9,7 @@ const records = window.MVP_DATA || [];
 let selectedRows = new Set();
 let searchQuery = '';
 let hasRun = false;          // проверка хотя бы раз выполнена
+let isRunning = false;       // проверка выполняется прямо сейчас
 let applyMode = false;       // нормализации применены к данным
 let reportRules = [];        // правила текущего отчёта
 let reportRuleIndex = 0;
@@ -85,6 +86,18 @@ function renderTable() {
   if (!tbody) return;
   const list = visibleRecords();
   tbody.innerHTML = '';
+
+  if (!list.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'empty-row';
+    tr.innerHTML = '<td colspan="10">' +
+      (records.length ? 'По запросу «' + escapeHtml(searchQuery) + '» ничего не найдено'
+                      : 'В представлении нет записей') + '</td>';
+    tbody.appendChild(tr);
+    document.getElementById('rowCount').textContent = '0 записей';
+    return;
+  }
+
   list.forEach((row, idx) => {
     const st = statusData(row.status);
     const chk = checkInfo(row);
@@ -145,7 +158,8 @@ function setActions(primary, secondary) {
   if (primary) {
     p.hidden = false;
     p.textContent = primary.label;
-    p.onclick = primary.onClick;
+    p.disabled = !!primary.disabled;
+    p.onclick = primary.disabled ? null : primary.onClick;
   } else {
     p.hidden = true;
     p.onclick = null;
@@ -242,20 +256,33 @@ function ruleList(rules) {
 
 function renderWidget() {
   const intro = document.getElementById('widgetIntro');
+  const loading = document.getElementById('widgetLoading');
   const result = document.getElementById('validationSection');
+
+  if (isRunning) {
+    intro.hidden = true;
+    loading.hidden = false;
+    result.hidden = true;
+    document.getElementById('loadingSub').textContent =
+      'Обрабатываем ' + records.length + ' ' + recordsWord(records.length) + '.';
+    setActions({ label: 'Проверяем…', disabled: true }, null);
+    return;
+  }
 
   if (!hasRun) {
     intro.hidden = false;
+    loading.hidden = true;
     result.hidden = true;
     document.getElementById('sourceCount').textContent = records.length + ' ' + recordsWord(records.length);
     setActions(
-      { label: 'Проверить данные', onClick: runValidation },
+      { label: 'Проверить данные', onClick: runValidation, disabled: !records.length },
       { label: 'Настройки проверки', disabled: true, title: 'Экран настроек появится на следующей итерации' }
     );
     return;
   }
 
   intro.hidden = true;
+  loading.hidden = true;
   result.hidden = false;
 
   const title = document.getElementById('resultTitle');
@@ -290,13 +317,23 @@ function renderWidget() {
   }
 }
 
+/* Проверка синхронная и быстрая; короткая задержка нужна только чтобы
+   состояние «выполняется» успело отрисоваться и не мигало. */
+const RUN_MIN_MS = 400;
+
 function runValidation() {
-  applyMode = false;
-  hasRun = true;
-  validateAll();
-  reportRules = collectRuleChanges();
-  renderTable();
+  if (isRunning) return;
+  isRunning = true;
   renderWidget();
+  setTimeout(() => {
+    applyMode = false;
+    hasRun = true;
+    validateAll();
+    reportRules = collectRuleChanges();
+    isRunning = false;
+    renderTable();
+    renderWidget();
+  }, RUN_MIN_MS);
 }
 
 /* ---------- применение и откат ---------- */
