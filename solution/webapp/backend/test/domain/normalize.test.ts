@@ -1,0 +1,333 @@
+import { describe, expect, test } from 'vitest';
+import {
+  normalizeBudget,
+  normalizeCity,
+  normalizeCompanyName,
+  normalizeCurrency,
+  normalizeDate,
+  normalizeEmail,
+  normalizeFio,
+  normalizeInn,
+  normalizePhone,
+  normalizePriority,
+  normalizeStatus,
+} from '../../src/domain/normalize/index.js';
+
+const codes = (result: { issues: readonly { code: string }[] }): string[] =>
+  result.issues.map((issue) => issue.code);
+
+describe('email', () => {
+  test('приводит к нижнему регистру и убирает пробелы и mailto', () => {
+    expect(normalizeEmail(' MAILTO:Info @ A.example ')).toMatchObject({
+      value: 'info@a.example',
+      changed: true,
+    });
+  });
+
+  test('помечает нераспознанный адрес ошибкой', () => {
+    expect(codes(normalizeEmail('не-почта'))).toContain('INVALID_EMAIL');
+  });
+
+  test.each([
+    '.info@example.com',
+    'info.@example.com',
+    'in..fo@example.com',
+    'info@-example.com',
+    'info@example-.com',
+    'info@example..com',
+    'info@@example.com',
+  ])('отклоняет структурно некорректный адрес: %s', (raw) => {
+    expect(codes(normalizeEmail(raw))).toContain('INVALID_EMAIL');
+  });
+
+  test('отклоняет слишком длинную локальную часть', () => {
+    expect(codes(normalizeEmail(`${'a'.repeat(65)}@example.com`))).toContain('INVALID_EMAIL');
+  });
+
+  test('пустое значение не даёт предложения', () => {
+    expect(normalizeEmail('   ')).toMatchObject({ value: null, changed: false });
+  });
+});
+
+describe('phone', () => {
+  test('приводит восьмёрку к +7', () => {
+    expect(normalizePhone('8 (925) 952-11-02')).toMatchObject({
+      value: '+79259521102',
+      changed: true,
+    });
+  });
+
+  test('маскированный номер помечается предупреждением', () => {
+    expect(normalizePhone('+7925*****02')).toMatchObject({
+      value: '+7925*****02',
+      changed: false,
+    });
+    expect(codes(normalizePhone('+7925*****02'))).toContain('MASKED_PHONE');
+  });
+
+  test('принимает валидный международный номер только с кодом страны', () => {
+    expect(normalizePhone('+44 20 7946 0958')).toMatchObject({
+      value: '+442079460958',
+      changed: true,
+      issues: [],
+    });
+  });
+
+  test.each([
+    'abc1234567890xyz',
+    'ИНН 1234567890',
+    '12345abc67890',
+    '0000000000',
+    '799999999999',
+    '8-800-FLOWERS',
+  ])('не извлекает телефон из мусора: %s', (raw) => {
+    const result = normalizePhone(raw);
+    expect(result).toMatchObject({ value: raw, changed: false });
+    expect(codes(result)).toContain('BAD_PHONE');
+  });
+
+  test('распознаёт явную подпись телефона', () => {
+    expect(normalizePhone('тел. +7 (925) 952-11-02')).toMatchObject({
+      value: '+79259521102',
+      changed: true,
+      issues: [],
+    });
+  });
+
+  test('не отбрасывает добавочный номер молча', () => {
+    const raw = '+7 (495) 123-45-67 доб. 123';
+    const result = normalizePhone(raw);
+    expect(result).toMatchObject({ value: raw, changed: false });
+    expect(codes(result)).toContain('PHONE_EXTENSION_PRESENT');
+  });
+});
+
+describe('inn', () => {
+  test('снимает префикс ИНН', () => {
+    expect(normalizeInn('ИНН 6012447316')).toMatchObject({
+      value: '6012447316',
+      changed: true,
+    });
+  });
+
+  // Регрессия: прежняя реализация оставляла дефис и не считала это проблемой.
+  test('дефис между цифрами убирается как разделитель', () => {
+    expect(normalizeInn('1308-807582')).toMatchObject({
+      value: '1308807582',
+      changed: true,
+      issues: [],
+    });
+  });
+
+  test('короткий ИНН помечается ошибкой длины', () => {
+    expect(codes(normalizeInn('ИНН 60-12'))).toContain('BAD_INN_LEN');
+  });
+
+  test('нецифровой ИНН помечается ошибкой', () => {
+    expect(codes(normalizeInn('ИНН АБ-В'))).toContain('BAD_INN');
+  });
+});
+
+describe('city', () => {
+  test('снимает префикс с пробелом', () => {
+    expect(normalizeCity(' Г Екатеринбург ')).toMatchObject({ value: 'Екатеринбург' });
+  });
+
+  // Регрессия: прежняя реализация давала «. Сочи».
+  test('снимает префикс с точкой целиком', () => {
+    expect(normalizeCity('Г. Сочи')).toMatchObject({ value: 'Сочи' });
+    expect(normalizeCity('г. Краснодар')).toMatchObject({ value: 'Краснодар' });
+  });
+
+  // Регрессия: прежняя реализация давала «агарин».
+  test('не режет город, который просто начинается на «Г»', () => {
+    expect(normalizeCity('Гагарин')).toMatchObject({ value: 'Гагарин', changed: false });
+  });
+
+  // Регистр приводится к каноническому написанию из словаря городов.
+  test('приводит регистр к каноническому', () => {
+    expect(normalizeCity('ИЖЕВСК')).toMatchObject({ value: 'Ижевск', changed: true });
+    expect(normalizeCity('ижевск')).toMatchObject({ value: 'Ижевск', changed: true });
+    expect(normalizeCity('Ижевск')).toMatchObject({ changed: false });
+  });
+
+  test('разворачивает транслитерацию известных городов', () => {
+    expect(normalizeCity('Tomsk')).toMatchObject({ value: 'Томск', changed: true });
+    expect(normalizeCity('TOMSK')).toMatchObject({ value: 'Томск' });
+    expect(normalizeCity('Ekaterinburg')).toMatchObject({ value: 'Екатеринбург' });
+  });
+
+  test('понимает английские экзонимы', () => {
+    expect(normalizeCity('Moscow')).toMatchObject({ value: 'Москва' });
+    expect(normalizeCity('ST. PETERSBURG')).toMatchObject({ value: 'Санкт-Петербург' });
+    expect(normalizeCity('Rostov-on-Don')).toMatchObject({ value: 'Ростов-на-Дону' });
+  });
+
+  test('частицы в составном названии остаются строчными', () => {
+    expect(normalizeCity('РОСТОВ-НА-ДОНУ')).toMatchObject({ value: 'Ростов-на-Дону' });
+    expect(normalizeCity('НИЖНИЙ НОВГОРОД')).toMatchObject({ value: 'Нижний Новгород' });
+  });
+
+  test('незнакомому городу канон не выдумывается', () => {
+    // Регистр поправить можно, а кириллический вариант — нет.
+    expect(normalizeCity('ГОРОДЕЦ')).toMatchObject({ value: 'Городец' });
+    expect(codes(normalizeCity('Metropolis'))).toContain('UNRECOGNIZED_CITY');
+  });
+
+  test('разворачивает известные сокращения и латиницу', () => {
+    expect(normalizeCity('Нск')).toMatchObject({ value: 'Новосибирск' });
+    expect(normalizeCity('Vladivostok')).toMatchObject({ value: 'Владивосток' });
+  });
+
+  test('начинает название города с прописной буквы', () => {
+    expect(normalizeCity('калининград')).toMatchObject({ value: 'Калининград', changed: true });
+    expect(normalizeCity('г. краснодар')).toMatchObject({ value: 'Краснодар', changed: true });
+    // Составное название берётся из словаря целиком, а не капитализируется
+    // по первому слову: раньше здесь получалось «Нижний новгород».
+    expect(normalizeCity('нижний новгород')).toMatchObject({ value: 'Нижний Новгород' });
+    expect(normalizeCity('Ростов-на-Дону')).toMatchObject({
+      value: 'Ростов-на-Дону',
+      changed: false,
+    });
+  });
+
+  test('неизвестный город остаётся, но помечается для разбора', () => {
+    // Опечатки, смешанный алфавит и сокращения детерминированно не чинятся.
+    expect(normalizeCity('Metropolis')).toMatchObject({ value: 'Metropolis' });
+    expect(codes(normalizeCity('Metropolis'))).toContain('UNRECOGNIZED_CITY');
+    expect(codes(normalizeCity('Челябинкс'))).toContain('UNRECOGNIZED_CITY');
+    expect(codes(normalizeCity('С-Пб'))).toContain('UNRECOGNIZED_CITY');
+    // Узнанный город замечаний не даёт.
+    expect(codes(normalizeCity('Tomsk'))).toEqual([]);
+    expect(codes(normalizeCity('ИЖЕВСК'))).toEqual([]);
+  });
+});
+
+describe('fio', () => {
+  test('приводит к единому регистру и схлопывает пробелы', () => {
+    expect(normalizeFio('  НИКОЛАЕВ  максим ')).toMatchObject({
+      value: 'Николаев Максим',
+      changed: true,
+    });
+  });
+
+  test('сохраняет инициалы', () => {
+    expect(normalizeFio('Николаев М.')).toMatchObject({ value: 'Николаев М.' });
+  });
+
+  // Регрессия: цепочка инициалов не распознавалась и приводилась как слово.
+  test('цепочка инициалов целиком в верхнем регистре', () => {
+    expect(normalizeFio('Степанова А.о.')).toMatchObject({ value: 'Степанова А.О.', changed: true });
+    expect(normalizeFio('Иванов а.б.')).toMatchObject({ value: 'Иванов А.Б.' });
+    expect(normalizeFio('СТЕПАНОВА А.О.')).toMatchObject({ value: 'Степанова А.О.' });
+    expect(normalizeFio('Алексеев И.А.')).toMatchObject({ changed: false });
+  });
+});
+
+describe('budget', () => {
+  test('убирает валюту и разряды', () => {
+    expect(normalizeBudget('4 603 000 ₽')).toMatchObject({ value: '4603000', changed: true });
+    expect(normalizeBudget('RUB 991000')).toMatchObject({ value: '991000' });
+  });
+
+  test('разворачивает млн и тыс', () => {
+    expect(normalizeBudget('2,08 млн')).toMatchObject({ value: '2080000' });
+    expect(normalizeBudget('4081 тыс.')).toMatchObject({ value: '4081000' });
+  });
+
+  test('подозрительные суммы помечаются предупреждением', () => {
+    expect(codes(normalizeBudget('500'))).toContain('TINY_BUDGET');
+    expect(codes(normalizeBudget('900000000'))).toContain('HUGE_BUDGET');
+  });
+
+  test('нераспознанный формат не предлагает изменения', () => {
+    const result = normalizeBudget('по договорённости');
+    expect(result.changed).toBe(false);
+    expect(codes(result)).toContain('BAD_BUDGET');
+  });
+});
+
+describe('date', () => {
+  test('разбирает поддерживаемые форматы', () => {
+    expect(normalizeDate('07.12.2026')).toMatchObject({ value: '2026-12-07' });
+    expect(normalizeDate('06.02.27')).toMatchObject({ value: '2027-02-06' });
+    expect(normalizeDate('11 декабря 2026')).toMatchObject({ value: '2026-12-11' });
+    expect(normalizeDate('04/06/2027')).toMatchObject({ value: '2027-06-04' });
+  });
+
+  // Регрессия: прежняя реализация молча превращала это в 2027-03-03.
+  test('несуществующая календарная дата — ошибка, а не соседняя дата', () => {
+    const result = normalizeDate('31.02.2027');
+    expect(result.changed).toBe(false);
+    expect(result.value).toBe('31.02.2027');
+    expect(codes(result)).toContain('IMPOSSIBLE_DATE');
+  });
+
+  test('високосный год остаётся валидным', () => {
+    expect(normalizeDate('29.02.2028')).toMatchObject({ value: '2028-02-29' });
+    expect(codes(normalizeDate('29.02.2027'))).toContain('IMPOSSIBLE_DATE');
+  });
+
+  // Регрессия: прежняя реализация считала такое значение уже нормализованным.
+  test('дата со временем обрезается до даты', () => {
+    expect(normalizeDate('2027-01-01T00:00:00Z')).toMatchObject({
+      value: '2027-01-01',
+      changed: true,
+    });
+  });
+
+  test('уже нормализованная дата не даёт предложения', () => {
+    expect(normalizeDate('2026-09-29')).toMatchObject({ value: '2026-09-29', changed: false });
+  });
+
+  test('нераспознанный формат помечается ошибкой', () => {
+    expect(codes(normalizeDate('когда-нибудь'))).toContain('BAD_DATE');
+  });
+});
+
+describe('название компании', () => {
+  test('убирает лишние пробелы и приводит кавычки', () => {
+    expect(normalizeCompanyName('  ООО  "Ромашка"  ')).toMatchObject({
+      value: 'ООО «Ромашка»',
+      changed: true,
+    });
+  });
+
+  // Регистр и ОПФ — значимая информация, их правило не трогает.
+  test('не меняет регистр и не снимает ОПФ', () => {
+    expect(normalizeCompanyName('АО МТС')).toMatchObject({ value: 'АО МТС', changed: false });
+    expect(normalizeCompanyName('красный экосистема')).toMatchObject({ changed: false });
+  });
+});
+
+describe('словарные значения', () => {
+  test('валюта сводится к коду ISO', () => {
+    ['RUR', 'руб.', '₽', 'рубли'].forEach((raw) => {
+      expect(normalizeCurrency(raw)).toMatchObject({ value: 'RUB', changed: true });
+    });
+    expect(normalizeCurrency('RUB')).toMatchObject({ value: 'RUB', changed: false });
+  });
+
+  test('незнакомая валюта не меняется, но помечается', () => {
+    const result = normalizeCurrency('USD');
+    expect(result.changed).toBe(false);
+    expect(codes(result)).toContain('CURRENCY_UNKNOWN');
+  });
+
+  test('приоритет сводится к шкале таблицы задач', () => {
+    expect(normalizePriority('P1')).toMatchObject({ value: 'Критический' });
+    expect(normalizePriority('срочно')).toMatchObject({ value: 'Высокий' });
+    expect(normalizePriority('3')).toMatchObject({ value: 'Средний' });
+    expect(normalizePriority('low')).toMatchObject({ value: 'Низкий' });
+  });
+
+  test('статус сводится к единому написанию', () => {
+    expect(normalizeStatus('НА ПРОВЕРКЕ')).toMatchObject({ value: 'На проверке', changed: true });
+    expect(normalizeStatus('draft')).toMatchObject({ value: 'Черновик' });
+    expect(normalizeStatus('Новая')).toMatchObject({ changed: false });
+  });
+
+  test('незнакомый статус остаётся и помечается', () => {
+    expect(codes(normalizeStatus('в архиве'))).toContain('STATUS_UNRECOGNIZED');
+  });
+});

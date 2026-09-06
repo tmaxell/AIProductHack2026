@@ -1,0 +1,64 @@
+name: plc-webapp
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    init: true
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_PORT: "8000"
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+      APP_EXPOSE_DOCS: ${APP_EXPOSE_DOCS:-false}
+      APP_STORAGE_PATH: /app/storage/change-sets.sqlite
+      # Ключ передаётся только backend-процессу и никогда не встраивается во frontend.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      GROQ_STRUCTURED_OUTPUT: ${GROQ_STRUCTURED_OUTPUT:-strict}
+      GROQ_TIMEOUT_MS: ${GROQ_TIMEOUT_MS:-15000}
+      GROQ_MAX_RETRIES: ${GROQ_MAX_RETRIES:-2}
+      GROQ_MAX_COMPLETION_TOKENS: ${GROQ_MAX_COMPLETION_TOKENS:-1200}
+    volumes:
+      # Демонстрационный набор данных со справочниками. В продукте источником
+      # будет пространство MWS Tables, поэтому это read-only и вне образа.
+      - ../../data:/app/data:ro
+      # История draft/publish/rollback переживает пересоздание контейнера.
+      - change-set-storage:/app/storage
+    expose:
+      - "8000"
+    # Healthcheck объявлен здесь, а не только в Dockerfile: dev-override
+    # собирает другой stage, у которого HEALTHCHECK из runtime отсутствует.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
+    networks: [webapp]
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runtime
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [webapp]
+
+networks:
+  webapp:
+    driver: bridge
+
+volumes:
+  change-set-storage:

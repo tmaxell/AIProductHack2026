@@ -1,0 +1,358 @@
+import { RULES } from './rules.js';
+import { runRecordChecks } from './checks.js';
+import { fingerprint } from './fingerprint.js';
+import type { IssueSeverity } from './normalize/index.js';
+import {
+  EMPTY_REFERENCE_DATA,
+  findDuplicate,
+  matchCompany,
+  toQuery,
+  type ApplicationSummary,
+  type CompanyIndex,
+  type Confidence,
+  type ReferenceData,
+} from './matching/index.js';
+
+/** Поле, в которое записывается ссылка на запись справочника компаний. */
+export const COMPANY_REF_FIELD = 'company_ref_id';
+
+/** Поле, в которое записывается ссылка на заявку-оригинал. */
+export const DUPLICATE_OF_FIELD = 'duplicate_of';
+
+export interface SourceRecord {
+  readonly id: string;
+  readonly values: Readonly<Record<string, string | null>>;
+}
+
+/** Нормализация чинит формат значения, сопоставление связывает со справочником. */
+export type ActionKind = 'normalize' | 'match' | 'duplicate' | 'ai';
+
+/** Одно предлагаемое изменение одного поля одной записи. */
+export interface ChangeAction {
+  readonly kind: ActionKind;
+  /** Детерминированный id: пересчёт того же набора данных даёт тот же id. */
+  readonly id: string;
+  readonly recordId: string;
+  readonly field: string;
+  readonly ruleCode: string;
+  readonly ruleName: string;
+  readonly reason: string;
+  readonly group: string;
+  readonly before: string | null;
+  readonly after: string | null;
+  /** Уровень уверенности сопоставления; у нормализации отсутствует. */
+  readonly confidence?: Confidence;
+  /** Признаки, по которым найдено совпадение: делают рекомендацию объяснимой. */
+  readonly evidence?: readonly string[];
+}
+
+export interface RecordIssue {
+  readonly recordId: string;
+  readonly field: string;
+  readonly code: string;
+  readonly severity: IssueSeverity;
+  readonly message: string;
+}
+
+export interface ChangeSetSummary {
+  readonly records: number;
+  readonly actions: number;
+  readonly normalizations: number;
+  readonly matches: number;
+  readonly duplicates: number;
+  /** Замечания и предупреждения: требуют внимания человека. */
+  readonly attention: number;
+  /** Ошибки: изменение предложить нельзя. */
+  readonly blocking: number;
+}
+
+export interface ChangeSet {
+  readonly id: string;
+  readonly sourceFingerprint: string;
+  readonly createdAt: string;
+  readonly actions: readonly ChangeAction[];
+  readonly issues: readonly RecordIssue[];
+  readonly summary: ChangeSetSummary;
+}
+
+export function actionId(recordId: string, ruleCode: string): string {
+  return `${recordId}::${ruleCode}`;
+}
+
+const COMPANY_RULE = {
+  code: 'company_reference',
+  name: 'Компания из справочника',
+  reason: 'Связывание заявки с записью справочника компаний',
+  group: 'Справочники',
+} as const;
+
+/**
+ * Каноническое название берётся из справочника, а не выводится эвристикой.
+ * Это закрывает разом латиницу («Most Profil»), город в конце названия
+ * («Решение Мастер Владивосток») и разнобой регистра: у записи справочника
+ * есть и короткое название, и алиасы всех этих написаний.
+ */
+const COMPANY_NAME_RULE = {
+  code: 'company_canonical_name',
+  name: 'Название компании по справочнику',
+  reason: 'Замена написания на каноническое из справочника компаний',
+  group: 'Справочники',
+} as const;
+
+function matchAction(record: SourceRecord, index: CompanyIndex): {
+  action?: ChangeAction;
+  nameAction?: ChangeAction;
+  issue?: RecordIssue;
+} {
+  const outcome = matchCompany(
+    toQuery({
+      name: record.values.company_name,
+      inn: record.values.company_inn,
+      email: record.values.company_email,
+      phone: record.values.company_phone,
+      city: record.values.company_city,
+    }),
+    index,
+  );
+
+  if (outcome.kind === 'none') return {};
+
+  if (outcome.kind === 'ambiguous') {
+    return {
+      issue: {
+        recordId: record.id,
+        field: COMPANY_REF_FIELD,
+        code: 'AMBIGUOUS_COMPANY_MATCH',
+        severity: 'warning',
+        message:
+          `Справочнику соответствуют несколько компаний: ` +
+          outcome.candidates.map((candidate) => candidate.reference.id).join(', '),
+      },
+    };
+  }
+
+  if (outcome.kind === 'inactive') {
+    return {
+      issue: {
+        recordId: record.id,
+        field: COMPANY_REF_FIELD,
+        code: 'INACTIVE_COMPANY_MATCH',
+        severity: 'warning',
+        message: `Найдена неактивная запись справочника ${outcome.match.reference.id}`,
+      },
+    };
+  }
+
+  const evidence = outcome.match.factors.map((factor) => factor.label);
+  const result: { action?: ChangeAction; nameAction?: ChangeAction } = {};
+
+  const currentRef = record.values[COMPANY_REF_FIELD] ?? null;
+  if (currentRef !== outcome.match.reference.id) {
+    result.action = {
+      kind: 'match',
+      id: actionId(record.id, COMPANY_RULE.code),
+      recordId: record.id,
+      field: COMPANY_REF_FIELD,
+      ruleCode: COMPANY_RULE.code,
+      ruleName: COMPANY_RULE.name,
+      reason: COMPANY_RULE.reason,
+      group: COMPANY_RULE.group,
+      before: currentRef,
+      after: outcome.match.reference.id,
+      confidence: outcome.match.confidence,
+      evidence,
+    };
+  }
+
+  const canonical = outcome.match.reference.shortName.trim();
+  const currentName = record.values.company_name ?? null;
+  if (canonical !== '' && currentName !== null && currentName.trim() !== canonical) {
+    result.nameAction = {
+      kind: 'match',
+      id: actionId(record.id, COMPANY_NAME_RULE.code),
+      recordId: record.id,
+      field: 'company_name',
+      ruleCode: COMPANY_NAME_RULE.code,
+      ruleName: COMPANY_NAME_RULE.name,
+      reason: COMPANY_NAME_RULE.reason,
+      group: COMPANY_NAME_RULE.group,
+      before: currentName,
+      after: canonical,
+      confidence: outcome.match.confidence,
+      evidence,
+    };
+  }
+
+  return result;
+}
+
+const DUPLICATE_RULE = {
+  code: 'duplicate_application',
+  name: 'Возможный дубль заявки',
+  reason: 'Совпали название проекта и признаки компании с уже существующей заявкой',
+  group: 'Дубли',
+} as const;
+
+function toSummary(record: SourceRecord): ApplicationSummary {
+  return {
+    id: record.id,
+    applicationId: record.values.application_id ?? '',
+    companyName: record.values.company_name ?? '',
+    companyInn: record.values.company_inn ?? '',
+    companyEmail: record.values.company_email ?? '',
+    companyPhone: record.values.company_phone ?? '',
+    projectName: record.values.project_name ?? '',
+  };
+}
+
+function duplicateAction(record: SourceRecord, references: ReferenceData): ChangeAction | null {
+  const outcome = findDuplicate(toSummary(record), references.applications);
+  if (outcome === null) return null;
+
+  const current = record.values[DUPLICATE_OF_FIELD] ?? null;
+  if (current === outcome.canonical.id) return null;
+
+  const evidence = outcome.factors.map((factor) => factor.label);
+  if (outcome.groupSize > 2) evidence.push(`всего в группе ${outcome.groupSize}`);
+
+  return {
+    kind: 'duplicate',
+    id: actionId(record.id, DUPLICATE_RULE.code),
+    recordId: record.id,
+    field: DUPLICATE_OF_FIELD,
+    ruleCode: DUPLICATE_RULE.code,
+    ruleName: DUPLICATE_RULE.name,
+    reason: DUPLICATE_RULE.reason,
+    group: DUPLICATE_RULE.group,
+    before: current,
+    after: outcome.canonical.id,
+    confidence: outcome.confidence,
+    evidence,
+  };
+}
+
+export function buildChangeSet(
+  records: readonly SourceRecord[],
+  references: ReferenceData = EMPTY_REFERENCE_DATA,
+  now: Date = new Date(),
+): ChangeSet {
+  const actions: ChangeAction[] = [];
+  const issues: RecordIssue[] = [];
+  // Нормализованные значения нужны межполевым проверкам: сравнивать
+  // «06.02.27» и «2027-02-19» напрямую нельзя.
+  const normalized = new Map<string, Record<string, string | null>>();
+
+  // Внешний цикл по правилам: действия приходят уже сгруппированными по
+  // правилу в порядке RULES, поэтому отчёт не зависит от того, какие правила
+  // сработали на первой записи.
+  for (const rule of RULES) {
+    for (const record of records) {
+      const raw = record.values[rule.field];
+      const result = rule.normalize(raw);
+      if (result.value === null) continue;
+
+      const hasError = result.issues.some((found) => found.severity === 'error');
+
+      const bucket = normalized.get(record.id) ?? {};
+      // Значение, которое встанет в поле, если предложение принять.
+      bucket[rule.field] = hasError ? null : result.value;
+      normalized.set(record.id, bucket);
+
+      for (const found of result.issues) {
+        issues.push({
+          recordId: record.id,
+          field: rule.field,
+          code: found.code,
+          severity: found.severity,
+          message: found.message,
+        });
+      }
+
+      // Ошибка означает, что безопасного целевого значения нет. Даже если
+      // normalizer смог убрать часть мусора, такое изменение нельзя помещать
+      // в список применяемых действий.
+      if (hasError || !result.changed) continue;
+
+      actions.push({
+        kind: 'normalize',
+        id: actionId(record.id, rule.code),
+        recordId: record.id,
+        field: rule.field,
+        ruleCode: rule.code,
+        ruleName: rule.name,
+        reason: rule.reason,
+        group: rule.group,
+        before: raw ?? null,
+        after: result.value,
+      });
+    }
+  }
+
+  for (const record of records) {
+    for (const found of runRecordChecks(normalized.get(record.id) ?? {})) {
+      issues.push({ recordId: record.id, ...found });
+    }
+  }
+
+  let normalizations = actions.length;
+
+  // Сопоставление идёт после нормализации: у него отдельный смысл и отдельная
+  // строка в сводке — это рекомендация связи, а не исправление формата.
+  if (references.companies.size > 0) {
+    // Каноническое название заменяет собой обычную нормализацию того же поля:
+    // два предложения на одно поле пользователь подтвердить не сможет.
+    const supersededNames = new Set<string>();
+    for (const record of records) {
+      const { action, nameAction, issue: found } = matchAction(record, references.companies);
+      if (action) actions.push(action);
+      if (nameAction) {
+        actions.push(nameAction);
+        supersededNames.add(nameAction.recordId);
+      }
+      if (found) issues.push(found);
+    }
+    if (supersededNames.size > 0) {
+      // Один проход фильтром: splice в цикле по десяткам тысяч действий
+      // давал квадратичную сложность и заваливал разбор всей выгрузки.
+      const kept = actions.filter((candidate) => {
+        const superseded = candidate.kind === 'normalize' &&
+          candidate.field === 'company_name' &&
+          supersededNames.has(candidate.recordId);
+        if (superseded) normalizations -= 1;
+        return !superseded;
+      });
+      actions.length = 0;
+      actions.push(...kept);
+    }
+  }
+
+  const matches = actions.length - normalizations;
+
+  // Дубли ищутся по всей таблице заявок, а не только внутри выбранного набора:
+  // заявка-оригинал может не попасть в выбор пользователя.
+  if (references.applications.size > 0) {
+    for (const record of records) {
+      const action = duplicateAction(record, references);
+      if (action) actions.push(action);
+    }
+  }
+
+  const sourceFingerprint = fingerprint(records);
+
+  return {
+    id: `cs_${sourceFingerprint.slice(0, 16)}`,
+    sourceFingerprint,
+    createdAt: now.toISOString(),
+    actions,
+    issues,
+    summary: {
+      records: records.length,
+      actions: actions.length,
+      normalizations,
+      matches,
+      duplicates: actions.length - normalizations - matches,
+      attention: issues.filter((found) => found.severity !== 'error').length,
+      blocking: issues.filter((found) => found.severity === 'error').length,
+    },
+  };
+}
