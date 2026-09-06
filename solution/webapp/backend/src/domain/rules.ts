@@ -1,11 +1,15 @@
 import {
   normalizeBudget,
   normalizeCity,
+  normalizeCompanyName,
+  normalizeCurrency,
   normalizeDate,
   normalizeEmail,
   normalizeFio,
   normalizeInn,
   normalizePhone,
+  normalizePriority,
+  normalizeStatus,
   type Normalizer,
 } from './normalize/index.js';
 
@@ -28,6 +32,14 @@ export const RULES: readonly Rule[] = [
     reason: 'Приведение email к нижнему регистру и удаление пробелов',
     group: 'Контакты',
     normalize: normalizeEmail,
+  },
+  {
+    code: 'company_name',
+    field: 'company_name',
+    name: 'Название компании',
+    reason: 'Удаление лишних пробелов и приведение кавычек к единому виду',
+    group: 'Компания',
+    normalize: normalizeCompanyName,
   },
   {
     code: 'company_phone',
@@ -62,12 +74,36 @@ export const RULES: readonly Rule[] = [
     normalize: normalizeFio,
   },
   {
+    code: 'requester_email',
+    field: 'requester_email',
+    name: 'Email заявителя',
+    reason: 'Приведение email к нижнему регистру и удаление пробелов',
+    group: 'Контакты',
+    normalize: normalizeEmail,
+  },
+  {
+    code: 'requester_phone',
+    field: 'requester_phone',
+    name: 'Телефон заявителя',
+    reason: 'Приведение телефона к единому формату',
+    group: 'Контакты',
+    normalize: normalizePhone,
+  },
+  {
     code: 'budget',
     field: 'budget',
     name: 'Бюджет',
     reason: 'Очистка валюты и приведение «млн»/«тыс.» к числу',
     group: 'Финансы',
     normalize: normalizeBudget,
+  },
+  {
+    code: 'currency',
+    field: 'currency',
+    name: 'Валюта',
+    reason: 'Приведение к коду ISO 4217',
+    group: 'Финансы',
+    normalize: normalizeCurrency,
   },
   {
     code: 'planned_start',
@@ -84,6 +120,22 @@ export const RULES: readonly Rule[] = [
     reason: 'Приведение даты к формату ГГГГ-ММ-ДД',
     group: 'Сроки',
     normalize: normalizeDate,
+  },
+  {
+    code: 'priority',
+    field: 'priority',
+    name: 'Приоритет',
+    reason: 'Приведение к шкале, которую использует таблица задач',
+    group: 'Классификация',
+    normalize: normalizePriority,
+  },
+  {
+    code: 'status',
+    field: 'status',
+    name: 'Статус заявки',
+    reason: 'Приведение статуса к единому написанию',
+    group: 'Классификация',
+    normalize: normalizeStatus,
   },
 ];
 

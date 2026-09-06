@@ -126,3 +126,24 @@ describe('matchCompany', () => {
     expect(outcome.match.factors).toHaveLength(3);
   });
 });
+
+test('сведение ё в ключе сравнения находит компанию', () => {
+  // «Королёв» в заявке и «Королев» в справочнике должны совпасть.
+  const korolev: CompanyReference = {
+    ...romashka,
+    id: 'CMP-YO',
+    legalName: 'ООО «Королев Групп»',
+    shortName: 'Королев Групп',
+    inn: '7700000099',
+    email: 'info@korolev.example',
+    phone: '+74950000099',
+    aliases: [],
+  };
+
+  const outcome = matchCompany(
+    toQuery({ name: 'ООО «Королёв Групп»' }),
+    buildCompanyIndex([korolev]),
+  );
+
+  expect(outcome.kind).toBe('matched');
+});

@@ -2,11 +2,20 @@ import { normalizeCity, normalizeEmail, normalizeInn, normalizePhone } from '../
 import type { CompanyReference } from './types.js';
 
 /**
- * Ключ для сравнения названий: снимает ОПФ, кавычки и пунктуацию.
+ * Сведение «ё» к «е» только для сравнения. В самом значении «ё» сохраняется:
+ * «Королёв» и «Королев» — разные написания фамилии, и выбрасывать букву из
+ * данных нельзя. Так же устроено в виджет-треке (normalizeYoAndCase).
+ */
+function foldYo(raw: string): string {
+  return raw.replace(/ё/g, 'е').replace(/Ё/g, 'Е');
+}
+
+/**
+ * Ключ для сравнения названий: сводит «ё», снимает ОПФ, кавычки и пунктуацию.
  * «ООО «Северный Трейд»» и «северный трейд» дают один ключ.
  */
 export function companyNameKey(raw: string): string {
-  return raw
+  return foldYo(raw)
     .toLowerCase()
     .replace(/[«»"'`]/g, ' ')
     .replace(/(^|\s)(ооо|оао|зао|ао|пао|ип|нко|ано)(\s|$)/gu, ' ')
@@ -24,7 +33,7 @@ export const emailKey = (raw: string): string | null => key(normalizeEmail(raw))
 export const phoneKey = (raw: string): string | null => key(normalizePhone(raw));
 export const cityKey = (raw: string): string | null => {
   const city = key(normalizeCity(raw));
-  return city === null ? null : city.toLowerCase();
+  return city === null ? null : foldYo(city).toLowerCase();
 };
 
 export interface CompanyIndex {

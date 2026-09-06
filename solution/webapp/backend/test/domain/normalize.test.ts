@@ -2,11 +2,15 @@ import { describe, expect, test } from 'vitest';
 import {
   normalizeBudget,
   normalizeCity,
+  normalizeCompanyName,
+  normalizeCurrency,
   normalizeDate,
   normalizeEmail,
   normalizeFio,
   normalizeInn,
   normalizePhone,
+  normalizePriority,
+  normalizeStatus,
 } from '../../src/domain/normalize/index.js';
 
 const codes = (result: { issues: readonly { code: string }[] }): string[] =>
@@ -167,5 +171,52 @@ describe('date', () => {
 
   test('нераспознанный формат помечается ошибкой', () => {
     expect(codes(normalizeDate('когда-нибудь'))).toContain('BAD_DATE');
+  });
+});
+
+describe('название компании', () => {
+  test('убирает лишние пробелы и приводит кавычки', () => {
+    expect(normalizeCompanyName('  ООО  "Ромашка"  ')).toMatchObject({
+      value: 'ООО «Ромашка»',
+      changed: true,
+    });
+  });
+
+  // Регистр и ОПФ — значимая информация, их правило не трогает.
+  test('не меняет регистр и не снимает ОПФ', () => {
+    expect(normalizeCompanyName('АО МТС')).toMatchObject({ value: 'АО МТС', changed: false });
+    expect(normalizeCompanyName('красный экосистема')).toMatchObject({ changed: false });
+  });
+});
+
+describe('словарные значения', () => {
+  test('валюта сводится к коду ISO', () => {
+    ['RUR', 'руб.', '₽', 'рубли'].forEach((raw) => {
+      expect(normalizeCurrency(raw)).toMatchObject({ value: 'RUB', changed: true });
+    });
+    expect(normalizeCurrency('RUB')).toMatchObject({ value: 'RUB', changed: false });
+  });
+
+  test('незнакомая валюта не меняется, но помечается', () => {
+    const result = normalizeCurrency('USD');
+    expect(result.changed).toBe(false);
+    expect(codes(result)).toContain('CURRENCY_UNKNOWN');
+  });
+
+  test('приоритет сводится к шкале таблицы задач', () => {
+    expect(normalizePriority('P1')).toMatchObject({ value: 'Критический' });
+    expect(normalizePriority('срочно')).toMatchObject({ value: 'Высокий' });
+    expect(normalizePriority('3')).toMatchObject({ value: 'Средний' });
+    expect(normalizePriority('low')).toMatchObject({ value: 'Низкий' });
+  });
+
+  test('статус сводится к единому написанию', () => {
+    expect(normalizeStatus('НА ПРОВЕРКЕ')).toMatchObject({ value: 'На проверке', changed: true });
+    expect(normalizeStatus('draft')).toMatchObject({ value: 'Черновик' });
+    expect(normalizeStatus('Новая')).toMatchObject({ changed: false });
+  });
+
+  test('незнакомый статус остаётся и помечается', () => {
+    expect(codes(normalizeStatus('в архиве'))).toContain('STATUS_UNRECOGNIZED');
   });
 });
